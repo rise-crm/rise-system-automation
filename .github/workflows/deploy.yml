@@ -35,13 +35,13 @@ jobs:
       - name: Set up Kubectl
         uses: azure/setup-kubectl@v3
         with:
-          version: 'latest'
+        version: 'latest'
 
-      - name: Set K8s Context
-        uses: azure/k8s-set-context@v3
-        with:
-          method: kubeconfig
-          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+      - name: Prepare Kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" > ~/.kube/config
+          chmod 600 ~/.kube/config
 
       # 3. Deploy to k3s
       - name: Deploy to k3s
