@@ -46,9 +46,14 @@ jobs:
       # 3. Deploy to k3s using direct kubectl
       - name: Deploy to k3s
         run: |
-          # We set the KUBECONFIG directly in the command line to ensure it's used
-          kubectl --kubeconfig=$HOME/.kube/config apply -f k8s/deployment.yaml --namespace whatsapp-system --validate=false
-          kubectl --kubeconfig=$HOME/.kube/config apply -f k8s/network.yaml --namespace whatsapp-system --validate=false
+          # Write the secret using a method that preserves newlines
+          cat <<EOF > k3s_config.yaml
+          ${{ secrets.KUBE_CONFIG }}
+          EOF
           
-          # Force the update
-          kubectl --kubeconfig=$HOME/.kube/config rollout restart deployment whatsapp-automation-backend -n whatsapp-system
+          # Force the use of this file AND force the server IP just in case
+          kubectl --kubeconfig=k3s_config.yaml --server=https://213.136.92.71:6443 --insecure-skip-tls-verify=true apply -f k8s/deployment.yaml --namespace whatsapp-system
+          kubectl --kubeconfig=k3s_config.yaml --server=https://213.136.92.71:6443 --insecure-skip-tls-verify=true apply -f k8s/network.yaml --namespace whatsapp-system
+          
+          # Restart to pull the 'latest' image
+          kubectl --kubeconfig=k3s_config.yaml --server=https://213.136.92.71:6443 --insecure-skip-tls-verify=true rollout restart deployment whatsapp-automation-backend -n whatsapp-system
