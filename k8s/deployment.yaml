@@ -37,6 +37,11 @@ spec:
                 secretKeyRef:
                   name: backend-secrets
                   key: SUPABASE_KEY
+            - name: SUPABASE_ROLE
+              valueFrom:
+                secretKeyRef:
+                   name: backend-secrets
+                   key: SUPABASE_ROLE
 
             # Evolution API Config
             - name: EVOLUTION_URL
