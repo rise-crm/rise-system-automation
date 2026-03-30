@@ -3,6 +3,8 @@ kind: Deployment
 metadata:
   name: whatsapp-automation-backend
   namespace: whatsapp-system
+  labels:
+    app: whatsapp-backend
 spec:
   replicas: 1
   selector:
@@ -13,12 +15,18 @@ spec:
       labels:
         app: whatsapp-backend
     spec:
+      # This allows k3s to pull from your private Docker Hub repo
+      imagePullSecrets:
+        - name: dockerhub-secret
       containers:
         - name: backend
-          image: your-docker-user/whatsapp-automation-backend:latest
+          image: ezdussin/whatsapp-automation-backend:latest
+          # Always check for a newer version of 'latest' on every restart
+          imagePullPolicy: Always
           ports:
             - containerPort: 8081
           env:
+            # Database Config
             - name: SUPABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -29,6 +37,8 @@ spec:
                 secretKeyRef:
                   name: backend-secrets
                   key: SUPABASE_KEY
+
+            # Evolution API Config
             - name: EVOLUTION_URL
               valueFrom:
                 secretKeyRef:
@@ -39,3 +49,24 @@ spec:
                 secretKeyRef:
                   name: backend-secrets
                   key: EVOLUTION_KEY
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1024Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: whatsapp-backend-service
+  namespace: whatsapp-system
+spec:
+  selector:
+    app: whatsapp-backend
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8081
+  type: ClusterIP
