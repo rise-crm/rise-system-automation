@@ -46,11 +46,9 @@ jobs:
       # 3. Deploy to k3s using direct kubectl
       - name: Deploy to k3s
         run: |
-          # Apply the manifests directly using the config we created in the previous step
-          kubectl apply -f k8s/deployment.yaml --namespace whatsapp-system
-          kubectl apply -f k8s/network.yaml --namespace whatsapp-system
+          # We set the KUBECONFIG directly in the command line to ensure it's used
+          kubectl --kubeconfig=$HOME/.kube/config apply -f k8s/deployment.yaml --namespace whatsapp-system --validate=false
+          kubectl --kubeconfig=$HOME/.kube/config apply -f k8s/network.yaml --namespace whatsapp-system --validate=false
           
-          # Force the deployment to pull the new 'latest' image from Docker Hub
-          kubectl rollout restart deployment whatsapp-automation-backend -n whatsapp-system
-        env:
-          KUBECONFIG: /home/runner/.kube/config
+          # Force the update
+          kubectl --kubeconfig=$HOME/.kube/config rollout restart deployment whatsapp-automation-backend -n whatsapp-system
