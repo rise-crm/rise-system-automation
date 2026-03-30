@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whatsapp-automation-backend
+  namespace: whatsapp-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: whatsapp-backend
+  template:
+    metadata:
+      labels:
+        app: whatsapp-backend
+    spec:
+      containers:
+        - name: backend
+          image: your-docker-user/whatsapp-automation-backend:latest
+          ports:
+            - containerPort: 8081
+          env:
+            - name: SUPABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: SUPABASE_URL
+            - name: SUPABASE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: SUPABASE_KEY
+            - name: EVOLUTION_URL
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: EVOLUTION_URL
+            - name: EVOLUTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: EVOLUTION_KEY

@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: whatsapp-backend-service
+  namespace: whatsapp-system
+spec:
+  selector:
+    app: whatsapp-backend
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8081
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: whatsapp-backend-ingress
+  namespace: whatsapp-system
+  annotations:
+    kubernetes.io/ingress.class: "traefik"
+spec:
+  rules:
+    - host: api.dariodussin.com.br
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: whatsapp-backend-service
+                port:
+                  number: 80

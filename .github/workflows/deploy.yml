@@ -1,0 +1,11 @@
+- name: Deploy to k3s
+  uses: azure/k8s-deploy@v4
+  with:
+    action: deploy
+    strategy: basic
+    manifests: |
+      k8s/deployment.yaml
+      k8s/network.yaml
+    images: 'ezdussin/whatsapp-automation-backend:latest'
+    kubectl-version: 'latest'
+    kubeconfig: ${{ secrets.KUBE_CONFIG }}
