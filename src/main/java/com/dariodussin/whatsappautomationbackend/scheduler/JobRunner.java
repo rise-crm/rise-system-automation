@@ -24,7 +24,7 @@ public class JobRunner {
         this.evolutionApiService = evolutionApiService;
     }
 
-    @Scheduled(fixedDelay = 10000)
+    @Scheduled(fixedDelay = 60000)
     public void runJobs() {
         List<ScheduleJob> tasks = supabaseApiService.fetchPendingTasks();
         if (tasks == null || tasks.isEmpty()) return;
