@@ -74,8 +74,7 @@ public class EvolutionApiService {
                 "number", number,
                 "mediatype", type.getEvolutionValue(), // Must be "image", "video", etc.
                 "media", meta.fileUrl(),
-                "caption", meta.message() != null ? meta.message() : "",
-                "fileName", "file"
+                "caption", meta.message() != null ? meta.message() : ""
         );
 
         System.out.println("[INFO] [EvolutionAPI] Sending Media | Type: " + type.getEvolutionValue());
