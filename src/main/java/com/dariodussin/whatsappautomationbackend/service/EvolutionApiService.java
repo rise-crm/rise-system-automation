@@ -39,7 +39,7 @@ public class EvolutionApiService {
                             "text", meta.message(),
                             "delay", 1200,
                             "linkPreview", true,
-                            "mentions", Map.of("everyOne", Objects.requireNonNullElse(meta.mentionAll(), false))
+                            "mentionsEveryOne", Objects.requireNonNullElse(meta.mentionAll(), false)
                     ))
                     .retrieve()
                     // Capture 4xx/5xx errors specifically
@@ -75,6 +75,7 @@ public class EvolutionApiService {
                 "number", number,
                 "mediatype", type.getEvolutionValue(), // Must be "image", "video", etc.
                 "media", meta.fileUrl(),
+                "delay", 1200,
                 "caption", meta.message() != null ? meta.message() : ""
         );
 
@@ -129,5 +130,38 @@ public class EvolutionApiService {
                 .block();
     }
 
+    // 5. SEND AUDIO MESSAGE (separate endpoint)
+    public void sendAudioMessage(String instance, String number, JobMetadata meta) {
+        // Prepare payload for WhatsApp audio message
+        Map<String, Object> payload = Map.of(
+                "number", number,
+                "audio", meta.fileUrl(),
+                "delay", 1200,
+                "linkPreview", true,
+                "mentionsEveryOne", Objects.requireNonNullElse(meta.mentionAll(), false)
+        );
+
+        System.out.println("[INFO] [EvolutionAPI] Sending Audio | Instance: " + instance);
+
+        try {
+            evolutionClient.post()
+                    .uri("/message/sendWhatsAppAudio/{instance}", instance)
+                    .bodyValue(payload)
+                    .retrieve()
+                    .onStatus(status -> status.isError(), response ->
+                            response.bodyToMono(String.class).flatMap(body -> {
+                                return Mono.error(new RuntimeException("Evolution API Error: " + body));
+                            })
+                    )
+                    .bodyToMono(Void.class)
+                    .block();
+
+            System.out.println("[SUCCESS] Audio sent to " + number);
+
+        } catch (Exception e) {
+            System.err.println("[CRITICAL] Audio Send Failed: " + e.getMessage());
+            throw e;
+        }
+    }
 
 }

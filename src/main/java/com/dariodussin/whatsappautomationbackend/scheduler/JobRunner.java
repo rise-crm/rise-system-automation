@@ -91,8 +91,10 @@ public class JobRunner {
         switch (task.type()) {
             case SEND_MESSAGE -> evolutionApiService.sendTextMessage(instance, groupId, meta);
 
-            case SEND_IMAGE, SEND_AUDIO, SEND_VIDEO, SEND_DOCUMENT ->
+            case SEND_IMAGE, SEND_VIDEO, SEND_DOCUMENT ->
                     evolutionApiService.sendMediaMessage(instance, groupId, task.type(), meta);
+
+            case SEND_AUDIO -> evolutionApiService.sendAudioMessage(instance, groupId, meta);
 
             case RENAME_GROUP -> evolutionApiService.updateGroupSubject(instance, groupId, meta);
 
