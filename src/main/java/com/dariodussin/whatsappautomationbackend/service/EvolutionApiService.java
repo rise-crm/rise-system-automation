@@ -11,6 +11,7 @@ import reactor.core.publisher.Mono;
 
 import java.util.Map;
 import java.util.Objects;
+import java.nio.file.Paths;
 
 @Service
 public class EvolutionApiService {
@@ -76,7 +77,8 @@ public class EvolutionApiService {
                 "mediatype", type.getEvolutionValue(), // Must be "image", "video", etc.
                 "media", meta.fileUrl(),
                 "delay", 1200,
-                "caption", meta.message() != null ? meta.message() : ""
+                "caption", meta.message() != null ? meta.message() : "",
+                "fileName", Paths.get(meta.fileUrl()).getFileName().toString()
         );
 
         System.out.println("[INFO] [EvolutionAPI] Sending Media | Type: " + type.getEvolutionValue());
