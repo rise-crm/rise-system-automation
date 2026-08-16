@@ -16,6 +16,7 @@ import java.util.List;
 @EnableScheduling
 public class JobRunner {
 
+
     private final SupabaseApiService supabaseApiService;
     private final EvolutionApiService evolutionApiService;
 
