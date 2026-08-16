@@ -101,7 +101,7 @@ public class EvolutionApiService {
 
         } catch (Exception e) {
             System.err.println("[CRITICAL] Media Send Failed: " + e.getMessage());
-            throw e; // This triggers your JobRunner's catch block to update Supabase
+            throw e;
         }
     }
 

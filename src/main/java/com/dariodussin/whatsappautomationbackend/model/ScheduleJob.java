@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.OffsetDateTime;
 
 public record ScheduleJob(
-        String id, // UUID from Supabase comes as a String
+        String id,
         @JsonProperty("campaign_id") String campaignId,
         @JsonProperty("scheduled_at") OffsetDateTime scheduledAt,
         JobType type,

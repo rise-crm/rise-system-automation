@@ -26,22 +26,17 @@ spec:
           ports:
             - containerPort: 8081
           env:
-            # Database Config
-            - name: SUPABASE_URL
+            # RISE Edge Functions
+            - name: EDGE_FUNCTIONS_URL
               valueFrom:
                 secretKeyRef:
                   name: backend-secrets
-                  key: SUPABASE_URL
-            - name: SUPABASE_KEY
+                  key: EDGE_FUNCTIONS_URL
+            - name: EDGE_FUNCTIONS_KEY
               valueFrom:
                 secretKeyRef:
                   name: backend-secrets
-                  key: SUPABASE_KEY
-            - name: SUPABASE_ROLE
-              valueFrom:
-                secretKeyRef:
-                   name: backend-secrets
-                   key: SUPABASE_ROLE
+                  key: EDGE_FUNCTIONS_KEY
 
             # Evolution API Config
             - name: EVOLUTION_URL
