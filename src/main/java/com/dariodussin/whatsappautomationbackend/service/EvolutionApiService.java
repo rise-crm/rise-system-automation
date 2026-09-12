@@ -1,14 +1,20 @@
 package com.dariodussin.whatsappautomationbackend.service;
 
+import com.dariodussin.whatsappautomationbackend.dto.GroupParticipant;
+import com.dariodussin.whatsappautomationbackend.dto.GroupParticipantsResponse;
+import com.dariodussin.whatsappautomationbackend.dto.MessageKey;
 import com.dariodussin.whatsappautomationbackend.model.JobType;
 import com.dariodussin.whatsappautomationbackend.model.MediaType;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import com.dariodussin.whatsappautomationbackend.model.JobMetadata;
 import reactor.core.publisher.Mono;
 
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.nio.file.Paths;
@@ -162,6 +168,100 @@ public class EvolutionApiService {
 
         } catch (Exception e) {
             System.err.println("[CRITICAL] Audio Send Failed: " + e.getMessage());
+            throw e;
+        }
+    }
+
+    public List<GroupParticipant> findGroupParticipants(String instance, String groupJid) {
+        GroupParticipantsResponse response = evolutionClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/group/participants/{instance}")
+                        .queryParam("groupJid", groupJid)
+                        .build(instance))
+                .retrieve()
+                .onStatus(status -> status.isError(), responseStatus ->
+                        responseStatus.bodyToMono(String.class).flatMap(body ->
+                                Mono.error(new RuntimeException("Evolution API Error: " + body))))
+                .bodyToMono(GroupParticipantsResponse.class)
+                .block();
+
+        if (response == null || response.participants() == null) {
+            return List.of();
+        }
+        return response.participants();
+    }
+
+    public void deleteMessageForEveryone(String instance, MessageKey key) {
+        if (key == null || key.id() == null || key.remoteJid() == null) {
+            throw new IllegalArgumentException("Message key is incomplete for deletion");
+        }
+
+        String participantJid = firstNonBlank(key.participant(), key.participantAlt(), key.senderPn());
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("id", key.id());
+        payload.put("remoteJid", key.remoteJid());
+        payload.put("fromMe", false);
+        if (participantJid != null) {
+            payload.put("participant", participantJid);
+        }
+
+        System.out.printf("[INFO] [Evolution] Deleting message | Instance: %s | Group: %s | MessageId: %s%n",
+                instance, key.remoteJid(), key.id());
+
+        try {
+            evolutionClient.method(HttpMethod.DELETE)
+                    .uri("/chat/deleteMessageForEveryone/{instance}", instance)
+                    .bodyValue(payload)
+                    .retrieve()
+                    .onStatus(status -> status.isError(), response ->
+                            response.bodyToMono(String.class).flatMap(body ->
+                                    Mono.error(new RuntimeException("Evolution API Error: " + body))))
+                    .bodyToMono(Void.class)
+                    .block();
+
+            System.out.printf("[SUCCESS] [Evolution] Deleted message %s from %s%n", key.id(), key.remoteJid());
+        } catch (Exception e) {
+            System.err.printf("[CRITICAL] [Evolution] Failed to delete message %s from %s! Reason: %s%n",
+                    key.id(), key.remoteJid(), e.getMessage());
+            throw e;
+        }
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    public void removeGroupParticipant(String instance, String groupJid, String participantJid) {
+        System.out.printf("[INFO] [Evolution] Removing participant | Instance: %s | Group: %s | Contact: %s%n",
+                instance, groupJid, participantJid);
+
+        try {
+            evolutionClient.post()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/group/updateParticipant/{instance}")
+                            .queryParam("groupJid", groupJid)
+                            .build(instance))
+                    .bodyValue(Map.of(
+                            "groupJid", groupJid,
+                            "action", "remove",
+                            "participants", List.of(participantJid)
+                    ))
+                    .retrieve()
+                    .onStatus(status -> status.isError(), response ->
+                            response.bodyToMono(String.class).flatMap(body ->
+                                    Mono.error(new RuntimeException("Evolution API Error: " + body))))
+                    .bodyToMono(Void.class)
+                    .block();
+
+            System.out.printf("[SUCCESS] [Evolution] Removed %s from %s%n", participantJid, groupJid);
+        } catch (Exception e) {
+            System.err.printf("[CRITICAL] [Evolution] Failed to remove %s from %s! Reason: %s%n",
+                    participantJid, groupJid, e.getMessage());
             throw e;
         }
     }

@@ -2,6 +2,8 @@ package com.dariodussin.whatsappautomationbackend.service;
 
 import com.dariodussin.whatsappautomationbackend.model.JobStatus;
 import com.dariodussin.whatsappautomationbackend.model.ScheduleJob;
+import com.dariodussin.whatsappautomationbackend.model.WorkerGroupCampaignResponse;
+import com.dariodussin.whatsappautomationbackend.model.WorkerInstanceByGroup;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
@@ -114,6 +116,72 @@ public class RiseApiService {
                     .toList();
         } catch (WebClientResponseException.NotFound e) {
             return List.of();
+        }
+    }
+
+    public WorkerGroupCampaignResponse getGuardianGroupCampaign(String groupId) {
+        try {
+            WorkerGroupCampaignResponse response = edgeFunctionsClient.get()
+                    .uri(uri -> uri.pathSegment("worker-group-campaign")
+                            .queryParam("group_id", groupId)
+                            .queryParam("guardian", true)
+                            .build())
+                    .retrieve()
+                    .onStatus(status -> status.isError() && status.value() != 404, resp ->
+                            resp.bodyToMono(String.class).flatMap(body ->
+                                    Mono.error(new RuntimeException(
+                                            "Rise API GET /worker-group-campaign failed: " + body))))
+                    .bodyToMono(WorkerGroupCampaignResponse.class)
+                    .block();
+
+            return response;
+        } catch (WebClientResponseException.NotFound e) {
+            return null;
+        } catch (Exception e) {
+            System.err.printf("[RISE-ERROR] GET /worker-group-campaign failed for %s: %s%n",
+                    groupId, e.getMessage());
+            return null;
+        }
+    }
+
+    public boolean isGuardianInstanceForGroup(String instanceName, WorkerGroupCampaignResponse groupCampaign) {
+        if (instanceName == null || instanceName.isBlank() || groupCampaign == null) {
+            return false;
+        }
+
+        for (var match : groupCampaign.guardianMatches()) {
+            String campaignInstance = getInstanceNameByCampaignId(match.campaignId());
+            if (campaignInstance != null && campaignInstance.equalsIgnoreCase(instanceName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public WorkerInstanceByGroup getAdminInstanceByGroupId(String groupId) {
+        try {
+            WorkerInstanceByGroup instance = edgeFunctionsClient.get()
+                    .uri(uri -> uri.pathSegment("worker-instance-by-group")
+                            .queryParam("group_id", groupId)
+                            .build())
+                    .retrieve()
+                    .onStatus(status -> status.isError() && status.value() != 404, resp ->
+                            resp.bodyToMono(String.class).flatMap(body ->
+                                    Mono.error(new RuntimeException(
+                                            "Rise API GET /worker-instance-by-group failed: " + body))))
+                    .bodyToMono(WorkerInstanceByGroup.class)
+                    .block();
+
+            if (instance == null || instance.instanceName() == null || instance.instanceName().isBlank()) {
+                return null;
+            }
+            return instance;
+        } catch (WebClientResponseException.NotFound e) {
+            return null;
+        } catch (Exception e) {
+            System.err.printf("[RISE-ERROR] GET /worker-instance-by-group failed for %s: %s%n",
+                    groupId, e.getMessage());
+            return null;
         }
     }
 }

@@ -23,3 +23,36 @@ Retorno: `[{ "instance_name": "..." }]`.
 ## GET /worker-groups?campaign_id=
 
 Retorno: `[{ "group_id": "...@g.us" }]`.
+
+## GET /worker-instance-by-group?group_id=
+
+Retorno: `{ "campaign_id": "uuid", "instance_name": "...", "status": "connected" }`.
+
+Usado pelo canal guardião: a partir do `remoteJid` do webhook, resolve campanha e instância admin.
+
+## GET /worker-group-campaign?group_id=&guardian=true
+
+Query opcional: `campaign_id` (valida vínculo com campanha específica).
+
+Retorno:
+
+```json
+{
+  "group_id": "1203...@g.us",
+  "linked": true,
+  "guardian_linked": true,
+  "count": 1,
+  "matches": [
+    {
+      "campaign_id": "uuid",
+      "campaign_name": "Canal Guardião",
+      "campaign_slug": "canal-guardiao",
+      "is_guardian": true,
+      "group_id": "1203...@g.us",
+      "group_name": "Grupo"
+    }
+  ]
+}
+```
+
+Usado pelo webhook para confirmar que o grupo está vinculado ao Canal Guardião e que a instância que recebeu o evento é a guardiã.
