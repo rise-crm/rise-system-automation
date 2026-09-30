@@ -11,6 +11,8 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Mono;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,6 +21,9 @@ import java.util.Map;
 public class RiseApiService {
 
     private static final int PENDING_JOBS_LIMIT = 100;
+    private static final int RETRY_JOBS_LIMIT = 3;
+    private static final int MAX_RETRIES = 3;
+    private static final int RETRY_LOOKBACK_HOURS = 12;
 
     private final WebClient edgeFunctionsClient;
 
@@ -40,9 +45,35 @@ public class RiseApiService {
                 .block();
     }
 
+    public List<ScheduleJob> fetchRetryableTasks() {
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        OffsetDateTime dateFrom = now.minusHours(RETRY_LOOKBACK_HOURS);
+
+        return edgeFunctionsClient.get()
+                .uri(uri -> uri.pathSegment("worker-jobs")
+                        .queryParam("status", "error")
+                        .queryParam("date_from", dateFrom.toString())
+                        .queryParam("date_to", now.toString())
+                        .queryParam("max_retries", MAX_RETRIES)
+                        .queryParam("limit", RETRY_JOBS_LIMIT)
+                        .build())
+                .retrieve()
+                .onStatus(status -> status.isError(), response ->
+                        response.bodyToMono(String.class).flatMap(body ->
+                                Mono.error(new RuntimeException(
+                                        "Rise API GET /worker-jobs (retry) failed: " + body))))
+                .bodyToMono(new ParameterizedTypeReference<List<ScheduleJob>>() {})
+                .block();
+    }
+
     public void updateJobStatus(String jobId, JobStatus status, String errorMessage) {
+        updateJobStatus(jobId, status, errorMessage, false);
+    }
+
+    public void updateJobStatus(String jobId, JobStatus status, String errorMessage, boolean incrementRetry) {
         try {
-            System.out.printf("[DB-UPDATE] Job: %s | New Status: %s%n", jobId, status);
+            System.out.printf("[DB-UPDATE] Job: %s | New Status: %s | increment_retry=%s%n",
+                    jobId, status, incrementRetry);
 
             Map<String, Object> body = new HashMap<>();
             body.put("id", jobId);
@@ -50,6 +81,9 @@ public class RiseApiService {
 
             if (errorMessage != null) {
                 body.put("error_message", errorMessage);
+            }
+            if (incrementRetry) {
+                body.put("increment_retry", true);
             }
 
             edgeFunctionsClient.patch()

@@ -31,7 +31,8 @@
 
 ## Regras
 
+- **Grupo fechado** (`announce`): qualquer mensagem de não-admin é **apagada** e o participante é **expulso**
 - **Spam:** 10 mensagens em menos de 1 minuto
-- Detectar em mensagem tipo template / com botão
-- Sempre apague a mensagem **primeiro**, depois expulse o participante
+- Detectar em mensagem tipo template / com botão → apagar e expulsar
+- Sempre apague a mensagem **primeiro**, depois expulse o participante (quando houver expulsão)
 - Lock temporário no Redis usando `groupJid` + `participantJid` com TTL de 5 segundos, para processar apenas o primeiro disparo e descartar as requisições duplicadas

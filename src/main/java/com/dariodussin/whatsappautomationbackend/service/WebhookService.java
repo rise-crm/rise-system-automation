@@ -2,6 +2,7 @@ package com.dariodussin.whatsappautomationbackend.service;
 
 import com.dariodussin.whatsappautomationbackend.dto.EvolutionMessageEvent;
 import com.dariodussin.whatsappautomationbackend.dto.EvolutionWebhookPayload;
+import com.dariodussin.whatsappautomationbackend.dto.GroupInfo;
 import com.dariodussin.whatsappautomationbackend.dto.GroupParticipant;
 import com.dariodussin.whatsappautomationbackend.dto.MessageCheckResponse;
 import com.dariodussin.whatsappautomationbackend.dto.MessageKey;
@@ -83,14 +84,11 @@ public class WebhookService {
             return new MessageCheckResponse("ok", payload.event(), true);
         }
 
+        String groupJid = key.remoteJid();
         boolean isTemplate = isTemplateMessage(data);
         boolean hasLink = containsLink(messageText);
-        if (!hasLink && !isTemplate) {
-            return new MessageCheckResponse("ok", payload.event(), true);
-        }
+        boolean isScamTrigger = hasLink || isTemplate;
 
-        String groupJid = key.remoteJid();
-        String triggerReason = isTemplate ? "template" : "link";
         WorkerGroupCampaignResponse groupCampaign = riseApiService.getGuardianGroupCampaign(groupJid);
         if (groupCampaign == null || !groupCampaign.isGuardianLinked()) {
             System.out.printf("[WEBHOOK] Skipping | Group %s is not linked to a guardian campaign (linked=%s, guardian_linked=%s)%n",
@@ -104,6 +102,18 @@ public class WebhookService {
                     payload.instance(), groupJid);
             return new MessageCheckResponse("ok", payload.event(), true);
         }
+
+        boolean groupClosed = false;
+        if (!isScamTrigger) {
+            groupClosed = isGroupClosed(payload.instance(), groupJid);
+            if (!groupClosed) {
+                return new MessageCheckResponse("ok", payload.event(), true);
+            }
+        }
+
+        String triggerReason = groupClosed
+                ? "closed_group"
+                : (isTemplate ? "template" : "link");
 
         WorkerInstanceByGroup adminInstance = riseApiService.getAdminInstanceByGroupId(groupJid);
         if (adminInstance == null) {
@@ -137,17 +147,17 @@ public class WebhookService {
                     payload.instance(), groupJid);
             GroupParticipant sender = findParticipant(participants, key);
             if (sender != null && sender.isGroupAdmin()) {
-                System.out.printf("[WEBHOOK] Skipping ban | %s is admin in %s%n", contactJid, groupJid);
+                System.out.printf("[WEBHOOK] Skipping | %s is admin in %s%n", contactJid, groupJid);
                 return new MessageCheckResponse("ok", payload.event(), true);
             }
             if (sender == null) {
-                System.out.printf("[WEBHOOK] Skipping ban | %s not found in group %s%n", contactJid, groupJid);
+                System.out.printf("[WEBHOOK] Skipping | %s not found in group %s%n", contactJid, groupJid);
                 return new MessageCheckResponse("ok", payload.event(), true);
             }
 
             String participantJid = canonicalParticipantJid(sender);
             if (participantJid == null) {
-                System.out.printf("[WEBHOOK] Skipping ban | Could not resolve canonical JID for %s in %s%n",
+                System.out.printf("[WEBHOOK] Skipping | Could not resolve canonical JID for %s in %s%n",
                         contactJid, groupJid);
                 return new MessageCheckResponse("ok", payload.event(), true);
             }
@@ -156,13 +166,28 @@ public class WebhookService {
                     participantJid, groupJid, adminInstanceName, campaignId, triggerReason, preview(messageText));
 
             evolutionApiService.deleteMessageForEveryone(adminInstanceName, key);
-            evolutionApiService.removeGroupParticipant(adminInstanceName, groupJid, participantJid);
+            if (isScamTrigger || groupClosed) {
+                evolutionApiService.removeGroupParticipant(adminInstanceName, groupJid, participantJid);
+            }
         } catch (Exception e) {
             System.err.printf("[WEBHOOK] Failed guard action (%s) for %s in %s (campaign %s): %s%n",
                     triggerReason, contactJid, groupJid, campaignId, e.getMessage());
         }
 
         return new MessageCheckResponse("ok", payload.event(), true);
+    }
+
+    private boolean isGroupClosed(String instance, String groupJid) {
+        try {
+            GroupInfo groupInfo = evolutionApiService.findGroupInfo(instance, groupJid);
+            boolean closed = groupInfo != null && groupInfo.isClosed();
+            System.out.printf("[WEBHOOK] Group %s announce/closed=%s%n", groupJid, closed);
+            return closed;
+        } catch (Exception e) {
+            System.err.printf("[WEBHOOK] Failed to read group settings for %s: %s%n",
+                    groupJid, e.getMessage());
+            return false;
+        }
     }
 
     private MessageCheckResponse handleUpdate(EvolutionWebhookPayload payload) {

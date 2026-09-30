@@ -1,5 +1,6 @@
 package com.dariodussin.whatsappautomationbackend.service;
 
+import com.dariodussin.whatsappautomationbackend.dto.GroupInfo;
 import com.dariodussin.whatsappautomationbackend.dto.GroupParticipant;
 import com.dariodussin.whatsappautomationbackend.dto.GroupParticipantsResponse;
 import com.dariodussin.whatsappautomationbackend.dto.MessageKey;
@@ -170,6 +171,20 @@ public class EvolutionApiService {
             System.err.println("[CRITICAL] Audio Send Failed: " + e.getMessage());
             throw e;
         }
+    }
+
+    public GroupInfo findGroupInfo(String instance, String groupJid) {
+        return evolutionClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/group/findGroupInfos/{instance}")
+                        .queryParam("groupJid", groupJid)
+                        .build(instance))
+                .retrieve()
+                .onStatus(status -> status.isError(), responseStatus ->
+                        responseStatus.bodyToMono(String.class).flatMap(body ->
+                                Mono.error(new RuntimeException("Evolution API Error: " + body))))
+                .bodyToMono(GroupInfo.class)
+                .block();
     }
 
     public List<GroupParticipant> findGroupParticipants(String instance, String groupJid) {
