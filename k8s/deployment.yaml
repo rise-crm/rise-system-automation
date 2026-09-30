@@ -49,6 +49,11 @@ spec:
                 secretKeyRef:
                   name: backend-secrets
                   key: EVOLUTION_KEY
+            - name: WEBHOOK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: WEBHOOK_TOKEN
           resources:
             requests:
               memory: "512Mi"

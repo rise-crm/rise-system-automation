@@ -19,17 +19,18 @@ import java.security.MessageDigest;
 public class WebhookController {
 
     private final WebhookService webhookService;
-    private final String evolutionKey;
+    private final String webhookToken;
 
     public WebhookController(WebhookService webhookService,
-                             @Value("${evolution.key}") String evolutionKey) {
+                             @Value("${webhook.token}") String webhookToken) {
         this.webhookService = webhookService;
-        this.evolutionKey = evolutionKey;
+        this.webhookToken = webhookToken;
     }
 
     @PostMapping("/message-check")
     public ResponseEntity<MessageCheckResponse> messageCheck(@RequestBody EvolutionWebhookPayload payload) {
-        if (!apiKeyMatches(payload.apikey(), evolutionKey)) {
+        System.out.println(payload);
+        if (!apiKeyMatches(payload.apikey(), webhookToken)) {
             System.out.println("[WEBHOOK] Rejected message-check: invalid apikey");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
