@@ -172,8 +172,8 @@ public class RiseApiService {
         } catch (WebClientResponseException.NotFound e) {
             return null;
         } catch (Exception e) {
-            System.err.printf("[RISE-ERROR] GET /worker-group-campaign failed for %s: %s%n",
-                    groupId, e.getMessage());
+            System.err.printf("[RISE-ERROR] GET /worker-group-campaign failed: %s%n",
+                    e.getClass().getSimpleName());
             return null;
         }
     }
@@ -213,8 +213,8 @@ public class RiseApiService {
         } catch (WebClientResponseException.NotFound e) {
             return null;
         } catch (Exception e) {
-            System.err.printf("[RISE-ERROR] GET /worker-instance-by-group failed for %s: %s%n",
-                    groupId, e.getMessage());
+            System.err.printf("[RISE-ERROR] GET /worker-instance-by-group failed: %s%n",
+                    e.getClass().getSimpleName());
             return null;
         }
     }

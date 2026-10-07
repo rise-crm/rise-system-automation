@@ -206,22 +206,21 @@ public class EvolutionApiService {
         return response.participants();
     }
 
-    public void deleteMessageForEveryone(String instance, MessageKey key) {
+    public void deleteMessageForEveryone(String instance, MessageKey key, String participantJid) {
         if (key == null || key.id() == null || key.remoteJid() == null) {
             throw new IllegalArgumentException("Message key is incomplete for deletion");
         }
+        if (participantJid == null || participantJid.isBlank()) {
+            throw new IllegalArgumentException("Participant JID is required for deletion");
+        }
 
-        String participantJid = firstNonBlank(key.participant(), key.participantAlt(), key.senderPn());
         Map<String, Object> payload = new HashMap<>();
         payload.put("id", key.id());
         payload.put("remoteJid", key.remoteJid());
         payload.put("fromMe", false);
-        if (participantJid != null) {
-            payload.put("participant", participantJid);
-        }
+        payload.put("participant", participantJid);
 
-        System.out.printf("[INFO] [Evolution] Deleting message | Instance: %s | Group: %s | MessageId: %s%n",
-                instance, key.remoteJid(), key.id());
+        System.out.println("[INFO] [Evolution] Deleting message");
 
         try {
             evolutionClient.method(HttpMethod.DELETE)
@@ -234,26 +233,16 @@ public class EvolutionApiService {
                     .bodyToMono(Void.class)
                     .block();
 
-            System.out.printf("[SUCCESS] [Evolution] Deleted message %s from %s%n", key.id(), key.remoteJid());
+            System.out.println("[SUCCESS] [Evolution] Deleted message");
         } catch (Exception e) {
-            System.err.printf("[CRITICAL] [Evolution] Failed to delete message %s from %s! Reason: %s%n",
-                    key.id(), key.remoteJid(), e.getMessage());
+            System.err.printf("[CRITICAL] [Evolution] Failed to delete message: %s%n",
+                    e.getClass().getSimpleName());
             throw e;
         }
     }
 
-    private static String firstNonBlank(String... values) {
-        for (String value : values) {
-            if (value != null && !value.isBlank()) {
-                return value;
-            }
-        }
-        return null;
-    }
-
     public void removeGroupParticipant(String instance, String groupJid, String participantJid) {
-        System.out.printf("[INFO] [Evolution] Removing participant | Instance: %s | Group: %s | Contact: %s%n",
-                instance, groupJid, participantJid);
+        System.out.println("[INFO] [Evolution] Removing participant");
 
         try {
             evolutionClient.post()
@@ -273,10 +262,10 @@ public class EvolutionApiService {
                     .bodyToMono(Void.class)
                     .block();
 
-            System.out.printf("[SUCCESS] [Evolution] Removed %s from %s%n", participantJid, groupJid);
+            System.out.println("[SUCCESS] [Evolution] Removed participant");
         } catch (Exception e) {
-            System.err.printf("[CRITICAL] [Evolution] Failed to remove %s from %s! Reason: %s%n",
-                    participantJid, groupJid, e.getMessage());
+            System.err.printf("[CRITICAL] [Evolution] Failed to remove participant: %s%n",
+                    e.getClass().getSimpleName());
             throw e;
         }
     }

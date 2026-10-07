@@ -23,7 +23,7 @@ spec:
     - host: api.dariodussin.com.br
       http:
         paths:
-          - path: /
+          - path: /webhook
             pathType: Prefix
             backend:
               service:

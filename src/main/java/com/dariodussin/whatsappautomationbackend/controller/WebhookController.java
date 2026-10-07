@@ -1,9 +1,10 @@
 package com.dariodussin.whatsappautomationbackend.controller;
 
+import com.dariodussin.whatsappautomationbackend.config.WebhookRateLimiter;
 import com.dariodussin.whatsappautomationbackend.dto.EvolutionWebhookPayload;
-import com.dariodussin.whatsappautomationbackend.dto.MessageCheckResponse;
 import com.dariodussin.whatsappautomationbackend.service.WebhookService;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,22 +20,31 @@ import java.security.MessageDigest;
 public class WebhookController {
 
     private final WebhookService webhookService;
+    private final WebhookRateLimiter webhookRateLimiter;
     private final String webhookToken;
 
     public WebhookController(WebhookService webhookService,
+                             WebhookRateLimiter webhookRateLimiter,
                              @Value("${webhook.token}") String webhookToken) {
         this.webhookService = webhookService;
+        this.webhookRateLimiter = webhookRateLimiter;
         this.webhookToken = webhookToken;
     }
 
     @PostMapping("/message-check")
-    public ResponseEntity<MessageCheckResponse> messageCheck(@RequestBody EvolutionWebhookPayload payload) {
-        System.out.println(payload);
+    public ResponseEntity<Void> messageCheck(@RequestBody EvolutionWebhookPayload payload) {
         if (!apiKeyMatches(payload.apikey(), webhookToken)) {
             System.out.println("[WEBHOOK] Rejected message-check: invalid apikey");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
-        return ResponseEntity.ok(webhookService.checkMessage(payload));
+        if (!webhookRateLimiter.tryAcquire()) {
+            System.out.println("[WEBHOOK] Rejected message-check: rate limit");
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .header(HttpHeaders.RETRY_AFTER, String.valueOf(webhookRateLimiter.retryAfterSeconds()))
+                    .build();
+        }
+        webhookService.checkMessage(payload);
+        return ResponseEntity.ok().build();
     }
 
     private static boolean apiKeyMatches(String provided, String expected) {
