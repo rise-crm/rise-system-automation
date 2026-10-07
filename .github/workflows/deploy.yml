@@ -47,6 +47,8 @@ jobs:
       # 3. Deploy to k3s using the server and CA from KUBE_CONFIG
       - name: Deploy to k3s
         run: |
+          kubectl --kubeconfig=k3s_config.yaml apply -f k8s/redis.yaml --namespace whatsapp-system
+          kubectl --kubeconfig=k3s_config.yaml rollout status deployment/redis -n whatsapp-system
           kubectl --kubeconfig=k3s_config.yaml apply -f k8s/deployment.yaml --namespace whatsapp-system
           kubectl --kubeconfig=k3s_config.yaml apply -f k8s/network.yaml --namespace whatsapp-system
           kubectl --kubeconfig=k3s_config.yaml rollout restart deployment whatsapp-automation-backend -n whatsapp-system

@@ -32,13 +32,16 @@ public class WebhookService {
     private final JsonMapper jsonMapper;
     private final EvolutionApiService evolutionApiService;
     private final RiseApiService riseApiService;
+    private final SpamTracker spamTracker;
 
     public WebhookService(JsonMapper jsonMapper,
                           EvolutionApiService evolutionApiService,
-                          RiseApiService riseApiService) {
+                          RiseApiService riseApiService,
+                          SpamTracker spamTracker) {
         this.jsonMapper = jsonMapper;
         this.evolutionApiService = evolutionApiService;
         this.riseApiService = riseApiService;
+        this.spamTracker = spamTracker;
     }
 
     public void checkMessage(EvolutionWebhookPayload payload) {
@@ -92,17 +95,46 @@ public class WebhookService {
             return;
         }
 
+        List<GroupParticipant> participants;
+        SenderMatch match;
+        String participantJid;
+        boolean isSpam;
+        try {
+            participants = evolutionApiService.findGroupParticipants(payload.instance(), groupJid);
+            match = matchSender(participants, key);
+            if (match.status() == SenderMatchStatus.ADMIN) {
+                System.out.println("[WEBHOOK] Skipping | sender is admin");
+                return;
+            }
+            if (match.status() == SenderMatchStatus.CONFLICT) {
+                System.out.println("[WEBHOOK] Skipping | sender JIDs do not identify one participant");
+                return;
+            }
+            if (match.status() != SenderMatchStatus.OK) {
+                System.out.println("[WEBHOOK] Skipping | sender not found in group");
+                return;
+            }
+
+            participantJid = canonicalClusterJid(match.cluster());
+            if (!isUsableContactJid(participantJid) || belongsToAdmin(participants, participantJid)) {
+                System.out.println("[WEBHOOK] Skipping | refusing to remove participant");
+                return;
+            }
+            isSpam = recordSpam(groupJid, participantJid, key.id());
+        } catch (Exception e) {
+            System.err.printf("[WEBHOOK] Failed to identify sender: %s%n", e.getClass().getSimpleName());
+            return;
+        }
+
         boolean groupClosed = false;
-        if (!isScamTrigger) {
+        if (!isScamTrigger && !isSpam) {
             groupClosed = isGroupClosed(payload.instance(), groupJid);
             if (!groupClosed) {
                 return;
             }
         }
 
-        String triggerReason = groupClosed
-                ? "closed_group"
-                : (isTemplate ? "template" : "link");
+        String triggerReason = triggerReason(isTemplate, hasLink, groupClosed);
 
         WorkerInstanceByGroup adminInstance = riseApiService.getAdminInstanceByGroupId(groupJid);
         if (adminInstance == null) {
@@ -122,35 +154,7 @@ public class WebhookService {
         String adminInstanceName = adminInstance.instanceName();
         String campaignId = adminInstance.campaignId();
 
-        String contactJid = resolveContactJid(key);
-        if (contactJid == null) {
-            System.out.printf("[WEBHOOK] %s detected but sender JID is missing%n", triggerReason);
-            return;
-        }
-
         try {
-            List<GroupParticipant> participants = evolutionApiService.findGroupParticipants(
-                    payload.instance(), groupJid);
-            SenderMatch match = matchSender(participants, key);
-            if (match.status() == SenderMatchStatus.ADMIN) {
-                System.out.println("[WEBHOOK] Skipping | sender is admin");
-                return;
-            }
-            if (match.status() == SenderMatchStatus.CONFLICT) {
-                System.out.println("[WEBHOOK] Skipping | sender JIDs do not identify one participant");
-                return;
-            }
-            if (match.status() != SenderMatchStatus.OK) {
-                System.out.println("[WEBHOOK] Skipping | sender not found in group");
-                return;
-            }
-
-            String participantJid = canonicalClusterJid(match.cluster());
-            if (!isUsableContactJid(participantJid) || belongsToAdmin(participants, participantJid)) {
-                System.out.println("[WEBHOOK] Skipping | refusing to remove participant");
-                return;
-            }
-
             System.out.printf("[WEBHOOK] Moderating | campaign: %s | reason: %s%n",
                     campaignId, triggerReason);
 
@@ -159,13 +163,38 @@ public class WebhookService {
                 deleteJid = participantJid;
             }
             evolutionApiService.deleteMessageForEveryone(adminInstanceName, key, deleteJid);
-            if (isScamTrigger || groupClosed) {
+            if (isScamTrigger || groupClosed || isSpam) {
                 evolutionApiService.removeGroupParticipant(adminInstanceName, groupJid, participantJid);
             }
         } catch (Exception e) {
             System.err.printf("[WEBHOOK] Failed guard action (%s) for campaign %s: %s%n",
                     triggerReason, campaignId, e.getClass().getSimpleName());
         }
+    }
+
+    private boolean recordSpam(String groupJid, String contactJid, String messageId) {
+        if (contactJid == null || messageId == null || messageId.isBlank()) {
+            return false;
+        }
+        try {
+            return spamTracker.record(groupJid, contactJid, messageId);
+        } catch (RuntimeException e) {
+            System.err.printf("[WEBHOOK] Spam window unavailable: %s%n", e.getClass().getSimpleName());
+            return false;
+        }
+    }
+
+    private static String triggerReason(boolean isTemplate, boolean hasLink, boolean groupClosed) {
+        if (isTemplate) {
+            return "template";
+        }
+        if (hasLink) {
+            return "link";
+        }
+        if (groupClosed) {
+            return "closed_group";
+        }
+        return "spam";
     }
 
     private boolean isGroupClosed(String instance, String groupJid) {

@@ -7,6 +7,7 @@ import com.dariodussin.whatsappautomationbackend.model.WorkerInstanceByGroup;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import tools.jackson.databind.json.JsonMapper;
@@ -18,7 +19,10 @@ import java.util.Map;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -39,17 +43,20 @@ class WebhookServiceTest {
     @Mock
     private RiseApiService riseApiService;
 
+    @Mock
+    private SpamTracker spamTracker;
+
     private JsonMapper jsonMapper;
     private WebhookService webhookService;
 
     @BeforeEach
     void setUp() {
         jsonMapper = JsonMapper.builder().build();
-        webhookService = new WebhookService(jsonMapper, evolutionApiService, riseApiService);
+        webhookService = new WebhookService(jsonMapper, evolutionApiService, riseApiService, spamTracker);
         when(riseApiService.getGuardianGroupCampaign(GROUP)).thenReturn(
                 new WorkerGroupCampaignResponse(GROUP, true, true, 1, List.of()));
         when(riseApiService.isGuardianInstanceForGroup(eq(GUARDIAN), any())).thenReturn(true);
-        when(riseApiService.getAdminInstanceByGroupId(GROUP)).thenReturn(
+        lenient().when(riseApiService.getAdminInstanceByGroupId(GROUP)).thenReturn(
                 new WorkerInstanceByGroup("camp-1", ADMIN_INSTANCE, "open"));
     }
 
@@ -61,6 +68,7 @@ class WebhookServiceTest {
 
         webhookService.checkMessage(upsert(MEMBER_PN, ADMIN_PN));
 
+        verify(spamTracker, never()).record(anyString(), anyString(), anyString());
         verify(evolutionApiService, never()).removeGroupParticipant(anyString(), anyString(), anyString());
         verify(evolutionApiService, never()).deleteMessageForEveryone(anyString(), any(), anyString());
     }
@@ -74,6 +82,7 @@ class WebhookServiceTest {
 
         webhookService.checkMessage(upsert(ADMIN_LID, ADMIN_PN));
 
+        verify(spamTracker, never()).record(anyString(), anyString(), anyString());
         verify(evolutionApiService, never()).removeGroupParticipant(anyString(), anyString(), anyString());
     }
 
@@ -85,6 +94,7 @@ class WebhookServiceTest {
 
         webhookService.checkMessage(upsert(ADMIN_LID, ADMIN_PN));
 
+        verify(spamTracker, never()).record(anyString(), anyString(), anyString());
         verify(evolutionApiService, never()).removeGroupParticipant(anyString(), anyString(), eq(ADMIN_PN));
         verify(evolutionApiService, never()).removeGroupParticipant(anyString(), anyString(), eq(ADMIN_LID));
     }
@@ -97,6 +107,7 @@ class WebhookServiceTest {
 
         webhookService.checkMessage(upsert(ADMIN_LID, ADMIN_PN));
 
+        verify(spamTracker, never()).record(anyString(), anyString(), anyString());
         verify(evolutionApiService, never()).removeGroupParticipant(anyString(), anyString(), anyString());
     }
 
@@ -129,8 +140,125 @@ class WebhookServiceTest {
         verify(evolutionApiService, never()).removeGroupParticipant(anyString(), anyString(), eq(adminPhone));
     }
 
+    @Test
+    void ninePlainMessagesDoNotModerate() {
+        when(evolutionApiService.findGroupParticipants(GUARDIAN, GROUP)).thenReturn(List.of(
+                participant(MEMBER_PN, null),
+                participant(ADMIN_PN, "admin")));
+        when(spamTracker.record(eq(GROUP), eq(MEMBER_PN), anyString())).thenReturn(false);
+
+        for (int i = 1; i <= 9; i++) {
+            webhookService.checkMessage(plainText(MEMBER_PN, null, "m" + i));
+        }
+
+        verify(evolutionApiService, never()).deleteMessageForEveryone(anyString(), any(), anyString());
+        verify(evolutionApiService, never()).removeGroupParticipant(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void tenthPlainMessageDeletesThenRemoves() {
+        when(spamTracker.record(anyString(), anyString(), anyString())).thenReturn(true);
+        when(evolutionApiService.findGroupParticipants(GUARDIAN, GROUP)).thenReturn(List.of(
+                participant(MEMBER_PN, null),
+                participant(ADMIN_PN, "admin")));
+
+        webhookService.checkMessage(plainText(MEMBER_PN, null, "m10"));
+
+        InOrder order = inOrder(evolutionApiService);
+        order.verify(evolutionApiService).deleteMessageForEveryone(eq(ADMIN_INSTANCE), any(), eq(MEMBER_PN));
+        order.verify(evolutionApiService).removeGroupParticipant(ADMIN_INSTANCE, GROUP, MEMBER_PN);
+    }
+
+    @Test
+    void repeatedMessageIdDoesNotModerate() {
+        when(evolutionApiService.findGroupParticipants(GUARDIAN, GROUP)).thenReturn(List.of(
+                participant(MEMBER_PN, null),
+                participant(ADMIN_PN, "admin")));
+        when(spamTracker.record(eq(GROUP), eq(MEMBER_PN), eq("same"))).thenReturn(false);
+
+        for (int i = 0; i < 10; i++) {
+            webhookService.checkMessage(plainText(MEMBER_PN, null, "same"));
+        }
+
+        verify(spamTracker, times(10)).record(GROUP, MEMBER_PN, "same");
+        verify(evolutionApiService, never()).deleteMessageForEveryone(anyString(), any(), anyString());
+        verify(evolutionApiService, never()).removeGroupParticipant(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void spamDoesNotRemoveAdmin() {
+        when(evolutionApiService.findGroupParticipants(GUARDIAN, GROUP)).thenReturn(List.of(
+                new GroupParticipant(ADMIN_LID, "admin", ADMIN_PN, ADMIN_PN, true, false),
+                participant(MEMBER_PN, null)));
+
+        webhookService.checkMessage(plainText(ADMIN_LID, ADMIN_PN, "admin-burst"));
+
+        verify(spamTracker, never()).record(anyString(), anyString(), anyString());
+        verify(evolutionApiService, never()).removeGroupParticipant(anyString(), anyString(), anyString());
+        verify(evolutionApiService, never()).deleteMessageForEveryone(anyString(), any(), anyString());
+    }
+
+    @Test
+    void forgedParticipantAltDoesNotFillAnotherSpamBucket() {
+        when(evolutionApiService.findGroupParticipants(GUARDIAN, GROUP)).thenReturn(List.of(
+                participant(MEMBER_PN, null),
+                participant(ADMIN_PN, "admin")));
+
+        webhookService.checkMessage(plainText(MEMBER_PN, ADMIN_PN, "forged"));
+
+        verify(spamTracker, never()).record(anyString(), anyString(), anyString());
+        verify(evolutionApiService, never()).removeGroupParticipant(anyString(), anyString(), anyString());
+        verify(evolutionApiService, never()).deleteMessageForEveryone(anyString(), any(), anyString());
+    }
+
+    @Test
+    void spamCountUsesRosterJidNotWebhookAlias() {
+        when(evolutionApiService.findGroupParticipants(GUARDIAN, GROUP)).thenReturn(List.of(
+                new GroupParticipant(MEMBER_LID, null, MEMBER_PN, MEMBER_PN, false, false),
+                participant(ADMIN_PN, "admin")));
+        when(spamTracker.record(GROUP, MEMBER_PN, "m10")).thenReturn(true);
+
+        webhookService.checkMessage(plainText(MEMBER_LID, "999999999999999@lid", "m10"));
+
+        verify(spamTracker).record(GROUP, MEMBER_PN, "m10");
+        verify(spamTracker, never()).record(eq(GROUP), eq("999999999999999@lid"), anyString());
+        verify(evolutionApiService).removeGroupParticipant(ADMIN_INSTANCE, GROUP, MEMBER_PN);
+    }
+
+    @Test
+    void linkIsModeratedWhenSpamTrackerFails() {
+        when(spamTracker.record(anyString(), anyString(), anyString()))
+                .thenThrow(new IllegalStateException("redis down"));
+        when(evolutionApiService.findGroupParticipants(GUARDIAN, GROUP)).thenReturn(List.of(
+                participant(MEMBER_PN, null),
+                participant(ADMIN_PN, "admin")));
+
+        webhookService.checkMessage(upsert(MEMBER_PN, null));
+
+        verify(evolutionApiService).deleteMessageForEveryone(eq(ADMIN_INSTANCE), any(), eq(MEMBER_PN));
+        verify(evolutionApiService).removeGroupParticipant(ADMIN_INSTANCE, GROUP, MEMBER_PN);
+    }
+
     private static GroupParticipant participant(String id, String admin) {
         return new GroupParticipant(id, admin, null, null, null, null);
+    }
+
+    private EvolutionWebhookPayload plainText(String participant, String participantAlt, String messageId) {
+        Map<String, Object> key = new HashMap<>();
+        key.put("remoteJid", GROUP);
+        key.put("fromMe", false);
+        key.put("id", messageId);
+        key.put("participant", participant);
+        if (participantAlt != null) {
+            key.put("participantAlt", participantAlt);
+        }
+        Map<String, Object> data = new HashMap<>();
+        data.put("key", key);
+        data.put("message", Map.of("conversation", "bom dia"));
+        data.put("messageType", "conversation");
+        return new EvolutionWebhookPayload(
+                "messages.upsert", GUARDIAN, jsonMapper.valueToTree(data),
+                null, null, null, null, null);
     }
 
     private EvolutionWebhookPayload upsert(String participant, String participantAlt) {
