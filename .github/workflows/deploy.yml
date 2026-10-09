@@ -51,9 +51,10 @@ jobs:
           KC="kubectl --kubeconfig=k3s_config.yaml -n whatsapp-system"
 
           if ! $KC get secret backend-secrets -o jsonpath='{.data.REDIS_PASSWORD}' | grep -q .; then
-            echo "backend-secrets in namespace whatsapp-system has no REDIS_PASSWORD key."
-            echo "Add that key before deploying. Redis and the backend both read it."
-            exit 1
+            echo "backend-secrets has no REDIS_PASSWORD. Adding one for Redis and the backend."
+            PASS="$(openssl rand -hex 32)"
+            $KC patch secret backend-secrets --type merge -p "{\"stringData\":{\"REDIS_PASSWORD\":\"${PASS}\"}}"
+            unset PASS
           fi
 
           $KC apply -f k8s/redis.yaml
