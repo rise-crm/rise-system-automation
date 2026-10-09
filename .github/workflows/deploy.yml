@@ -47,8 +47,25 @@ jobs:
       # 3. Deploy to k3s using the server and CA from KUBE_CONFIG
       - name: Deploy to k3s
         run: |
-          kubectl --kubeconfig=k3s_config.yaml apply -f k8s/redis.yaml --namespace whatsapp-system
-          kubectl --kubeconfig=k3s_config.yaml rollout status deployment/redis -n whatsapp-system
-          kubectl --kubeconfig=k3s_config.yaml apply -f k8s/deployment.yaml --namespace whatsapp-system
-          kubectl --kubeconfig=k3s_config.yaml apply -f k8s/network.yaml --namespace whatsapp-system
-          kubectl --kubeconfig=k3s_config.yaml rollout restart deployment whatsapp-automation-backend -n whatsapp-system
+          set -euo pipefail
+          KC="kubectl --kubeconfig=k3s_config.yaml -n whatsapp-system"
+
+          if ! $KC get secret backend-secrets -o jsonpath='{.data.REDIS_PASSWORD}' | grep -q .; then
+            echo "backend-secrets in namespace whatsapp-system has no REDIS_PASSWORD key."
+            echo "Add that key before deploying. Redis and the backend both read it."
+            exit 1
+          fi
+
+          $KC apply -f k8s/redis.yaml
+          if ! $KC rollout status deployment/redis --timeout=240s; then
+            echo "Redis did not become ready."
+            $KC get pods -l app=redis -o wide || true
+            $KC describe pods -l app=redis || true
+            $KC logs -l app=redis --all-containers --tail=200 --prefix || true
+            $KC get events --sort-by=.lastTimestamp | tail -n 40 || true
+            exit 1
+          fi
+
+          $KC apply -f k8s/deployment.yaml
+          $KC apply -f k8s/network.yaml
+          $KC rollout restart deployment/whatsapp-automation-backend

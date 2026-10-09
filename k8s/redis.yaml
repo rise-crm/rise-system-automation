@@ -7,6 +7,7 @@ metadata:
     app: redis
 spec:
   replicas: 1
+  progressDeadlineSeconds: 300
   selector:
     matchLabels:
       app: redis
@@ -15,6 +16,14 @@ spec:
       labels:
         app: redis
     spec:
+      # redis:7.4-alpine creates uid 999 and gid 1000. Alpine already uses gid 999.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: redis
           image: redis:7.4-alpine
@@ -33,18 +42,18 @@ spec:
                 secretKeyRef:
                   name: backend-secrets
                   key: REDIS_PASSWORD
-          command: ["redis-server"]
+          # Expand the password in the container. An empty --save argument in
+          # the pod spec is easy to drop, and Redis then exits on startup.
+          command: ["sh", "-c"]
           args:
-            - "--requirepass"
-            - "$(REDIS_PASSWORD)"
-            - "--save"
-            - ""
-            - "--appendonly"
-            - "no"
-            - "--maxmemory"
-            - "64mb"
-            - "--maxmemory-policy"
-            - "volatile-ttl"
+            - |
+              exec redis-server \
+                --requirepass "$REDIS_PASSWORD" \
+                --appendonly no \
+                --maxmemory 64mb \
+                --maxmemory-policy volatile-ttl \
+                --save "" \
+                --pidfile /tmp/redis.pid
           resources:
             requests:
               cpu: 50m
@@ -53,9 +62,6 @@ spec:
               cpu: 200m
               memory: 128Mi
           securityContext:
-            runAsNonRoot: true
-            runAsUser: 999
-            runAsGroup: 999
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
