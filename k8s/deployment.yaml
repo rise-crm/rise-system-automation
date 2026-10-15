@@ -15,7 +15,7 @@ spec:
       labels:
         app: whatsapp-backend
     spec:
-      # This allows k3s to pull from your private Docker Hub repo 
+      # This allows k3s to pull from your private Docker Hub repo
       imagePullSecrets:
         - name: dockerhub-secret
       containers:
