@@ -70,11 +70,17 @@ public class WebhookService {
                 data != null ? data.messageType() : null,
                 data != null ? data.status() : null);
 
-        if (data == null || key == null || Boolean.TRUE.equals(key.fromMe())) {
+        if (data == null || key == null) {
+            System.out.println("[WEBHOOK] Skipping | upsert payload missing data/key");
+            return;
+        }
+        if (Boolean.TRUE.equals(key.fromMe())) {
+            System.out.println("[WEBHOOK] Skipping | fromMe");
             return;
         }
 
         if (!isGroupJid(key.remoteJid())) {
+            System.out.println("[WEBHOOK] Skipping | not a group chat");
             return;
         }
 
@@ -130,6 +136,7 @@ public class WebhookService {
         if (!isScamTrigger && !isSpam) {
             groupClosed = isGroupClosed(payload.instance(), groupJid);
             if (!groupClosed) {
+                System.out.println("[WEBHOOK] Skipping | no moderation trigger");
                 return;
             }
         }

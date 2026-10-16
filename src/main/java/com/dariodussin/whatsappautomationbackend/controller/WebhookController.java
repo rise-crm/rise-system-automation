@@ -33,18 +33,33 @@ public class WebhookController {
 
     @PostMapping("/message-check")
     public ResponseEntity<Void> messageCheck(@RequestBody EvolutionWebhookPayload payload) {
+        long started = System.currentTimeMillis();
+        String event = payload.event();
+        System.out.printf("[WEBHOOK] message-check received | event=%s%n", event);
+
         if (!apiKeyMatches(payload.apikey(), webhookToken)) {
-            System.out.println("[WEBHOOK] Rejected message-check: invalid apikey");
+            System.out.printf("[WEBHOOK] message-check rejected | event=%s | reason=invalid_apikey | status=401 | duration=%dms%n",
+                    event, System.currentTimeMillis() - started);
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
         if (!webhookRateLimiter.tryAcquire()) {
-            System.out.println("[WEBHOOK] Rejected message-check: rate limit");
+            System.out.printf("[WEBHOOK] message-check rejected | event=%s | reason=rate_limit | status=429 | duration=%dms%n",
+                    event, System.currentTimeMillis() - started);
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .header(HttpHeaders.RETRY_AFTER, String.valueOf(webhookRateLimiter.retryAfterSeconds()))
                     .build();
         }
-        webhookService.checkMessage(payload);
-        return ResponseEntity.ok().build();
+
+        try {
+            webhookService.checkMessage(payload);
+            System.out.printf("[WEBHOOK] message-check done | event=%s | status=200 | duration=%dms%n",
+                    event, System.currentTimeMillis() - started);
+            return ResponseEntity.ok().build();
+        } catch (Exception e) {
+            System.err.printf("[WEBHOOK] message-check failed | event=%s | status=500 | error=%s | duration=%dms%n",
+                    event, e.getClass().getSimpleName(), System.currentTimeMillis() - started);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
     }
 
     private static boolean apiKeyMatches(String provided, String expected) {

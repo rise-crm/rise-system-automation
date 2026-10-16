@@ -20,8 +20,6 @@ public class EdgeFunctionsClientConfig {
                 ? edgeFunctionsUrl.substring(0, edgeFunctionsUrl.length() - 1)
                 : edgeFunctionsUrl;
 
-        System.out.println("x-api-token: " + edgeFunctionsKey);
-
         return WebClient.builder()
                 .baseUrl(baseUrl)
                 .defaultHeader("Content-Type", "application/json")

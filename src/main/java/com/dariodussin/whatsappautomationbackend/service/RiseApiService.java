@@ -32,38 +32,60 @@ public class RiseApiService {
     }
 
     public List<ScheduleJob> fetchPendingTasks() {
-        return edgeFunctionsClient.get()
-                .uri(uri -> uri.pathSegment("worker-jobs")
-                        .queryParam("status", "pending")
-                        .queryParam("limit", PENDING_JOBS_LIMIT)
-                        .build())
-                .retrieve()
-                .onStatus(status -> status.isError(), response ->
-                        response.bodyToMono(String.class).flatMap(body ->
-                                Mono.error(new RuntimeException("Rise API GET /worker-jobs failed: " + body))))
-                .bodyToMono(new ParameterizedTypeReference<List<ScheduleJob>>() {})
-                .block();
+        long started = System.currentTimeMillis();
+        try {
+            List<ScheduleJob> jobs = edgeFunctionsClient.get()
+                    .uri(uri -> uri.pathSegment("worker-jobs")
+                            .queryParam("status", "pending")
+                            .queryParam("limit", PENDING_JOBS_LIMIT)
+                            .build())
+                    .retrieve()
+                    .onStatus(status -> status.isError(), response ->
+                            response.bodyToMono(String.class).flatMap(body ->
+                                    Mono.error(new RuntimeException("Rise API GET /worker-jobs failed: " + body))))
+                    .bodyToMono(new ParameterizedTypeReference<List<ScheduleJob>>() {})
+                    .block();
+            int count = jobs == null ? 0 : jobs.size();
+            System.out.printf("[RISE] GET /worker-jobs | status=pending | count=%d | duration=%dms%n",
+                    count, System.currentTimeMillis() - started);
+            return jobs;
+        } catch (Exception e) {
+            System.err.printf("[RISE] GET /worker-jobs failed | status=pending | error=%s | duration=%dms%n",
+                    e.getClass().getSimpleName(), System.currentTimeMillis() - started);
+            throw e;
+        }
     }
 
     public List<ScheduleJob> fetchRetryableTasks() {
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         OffsetDateTime dateFrom = now.minusHours(RETRY_LOOKBACK_HOURS);
+        long started = System.currentTimeMillis();
 
-        return edgeFunctionsClient.get()
-                .uri(uri -> uri.pathSegment("worker-jobs")
-                        .queryParam("status", "error")
-                        .queryParam("date_from", dateFrom.toString())
-                        .queryParam("date_to", now.toString())
-                        .queryParam("max_retries", MAX_RETRIES)
-                        .queryParam("limit", RETRY_JOBS_LIMIT)
-                        .build())
-                .retrieve()
-                .onStatus(status -> status.isError(), response ->
-                        response.bodyToMono(String.class).flatMap(body ->
-                                Mono.error(new RuntimeException(
-                                        "Rise API GET /worker-jobs (retry) failed: " + body))))
-                .bodyToMono(new ParameterizedTypeReference<List<ScheduleJob>>() {})
-                .block();
+        try {
+            List<ScheduleJob> jobs = edgeFunctionsClient.get()
+                    .uri(uri -> uri.pathSegment("worker-jobs")
+                            .queryParam("status", "error")
+                            .queryParam("date_from", dateFrom.toString())
+                            .queryParam("date_to", now.toString())
+                            .queryParam("max_retries", MAX_RETRIES)
+                            .queryParam("limit", RETRY_JOBS_LIMIT)
+                            .build())
+                    .retrieve()
+                    .onStatus(status -> status.isError(), response ->
+                            response.bodyToMono(String.class).flatMap(body ->
+                                    Mono.error(new RuntimeException(
+                                            "Rise API GET /worker-jobs (retry) failed: " + body))))
+                    .bodyToMono(new ParameterizedTypeReference<List<ScheduleJob>>() {})
+                    .block();
+            int count = jobs == null ? 0 : jobs.size();
+            System.out.printf("[RISE] GET /worker-jobs | status=error | count=%d | duration=%dms%n",
+                    count, System.currentTimeMillis() - started);
+            return jobs;
+        } catch (Exception e) {
+            System.err.printf("[RISE] GET /worker-jobs failed | status=error | error=%s | duration=%dms%n",
+                    e.getClass().getSimpleName(), System.currentTimeMillis() - started);
+            throw e;
+        }
     }
 
     public void updateJobStatus(String jobId, JobStatus status, String errorMessage) {
