@@ -1,5 +1,6 @@
 package com.dariodussin.whatsappautomationbackend.controller;
 
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -13,6 +14,12 @@ public class ApiExceptionHandler {
     public ResponseEntity<Void> unreadableBody(HttpMessageNotReadableException ex) {
         System.err.printf("[HTTP] Bad request body | error=%s%n", rootCauseName(ex));
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+    }
+
+    @ExceptionHandler(DataAccessException.class)
+    public ResponseEntity<Void> dataStoreUnavailable(DataAccessException ex) {
+        System.err.printf("[HTTP] Data store unavailable | error=%s%n", rootCauseName(ex));
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
     }
 
     private static String rootCauseName(Throwable ex) {

@@ -30,3 +30,10 @@ spec:
                 name: whatsapp-backend-service
                 port:
                   number: 80
+          - path: /admin
+            pathType: Prefix
+            backend:
+              service:
+                name: whatsapp-backend-service
+                port:
+                  number: 80

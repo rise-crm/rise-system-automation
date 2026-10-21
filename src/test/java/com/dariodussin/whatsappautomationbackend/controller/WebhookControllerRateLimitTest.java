@@ -7,36 +7,21 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 class WebhookControllerRateLimitTest {
 
     @Test
-    void invalidKeyDoesNotConsumeQuotaOrCallEvolution() {
+    void excessReturns429WithoutCallingService() {
         WebhookService webhookService = mock(WebhookService.class);
         WebhookRateLimiter limiter = new WebhookRateLimiter(10, 1, () -> 0L);
-        WebhookController controller = new WebhookController(webhookService, limiter, "secret");
+        WebhookController controller = new WebhookController(webhookService, limiter);
 
-        var rejected = controller.messageCheck(payload("wrong"));
-
-        assertEquals(HttpStatus.UNAUTHORIZED, rejected.getStatusCode());
-        assertNull(rejected.getBody());
-        verify(webhookService, never()).checkMessage(any());
-        assertEquals(true, limiter.tryAcquire());
-    }
-
-    @Test
-    void authenticatedExcessReturns429WithoutCallingService() {
-        WebhookService webhookService = mock(WebhookService.class);
-        WebhookRateLimiter limiter = new WebhookRateLimiter(10, 1, () -> 0L);
-        WebhookController controller = new WebhookController(webhookService, limiter, "secret");
-
-        var allowed = controller.messageCheck(payload("secret"));
-        var limited = controller.messageCheck(payload("secret"));
+        var allowed = controller.messageCheck(payload());
+        var limited = controller.messageCheck(payload());
 
         assertEquals(HttpStatus.OK, allowed.getStatusCode());
         assertNull(allowed.getBody());
@@ -46,7 +31,7 @@ class WebhookControllerRateLimitTest {
         verify(webhookService).checkMessage(any());
     }
 
-    private static EvolutionWebhookPayload payload(String apikey) {
-        return new EvolutionWebhookPayload(null, null, null, null, null, null, null, apikey);
+    private static EvolutionWebhookPayload payload() {
+        return new EvolutionWebhookPayload(null, null, null, null, null, null, null, "secret");
     }
 }

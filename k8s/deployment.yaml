@@ -54,6 +54,11 @@ spec:
                 secretKeyRef:
                   name: backend-secrets
                   key: WEBHOOK_TOKEN
+            - name: ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: ADMIN_TOKEN
             - name: REDIS_HOST
               value: redis
             - name: REDIS_PORT

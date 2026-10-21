@@ -3,6 +3,7 @@ package com.dariodussin.whatsappautomationbackend.scheduler;
 import com.dariodussin.whatsappautomationbackend.model.JobStatus;
 import com.dariodussin.whatsappautomationbackend.model.ScheduleJob;
 import com.dariodussin.whatsappautomationbackend.service.JobExecutionService;
+import com.dariodussin.whatsappautomationbackend.service.JobPollingState;
 import com.dariodussin.whatsappautomationbackend.service.RiseApiService;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -14,14 +15,21 @@ public class JobRunner {
 
     private final RiseApiService riseApiService;
     private final JobExecutionService jobExecutionService;
+    private final JobPollingState pollingState;
 
-    public JobRunner(RiseApiService riseApiService, JobExecutionService jobExecutionService) {
+    public JobRunner(RiseApiService riseApiService,
+                     JobExecutionService jobExecutionService,
+                     JobPollingState pollingState) {
         this.riseApiService = riseApiService;
         this.jobExecutionService = jobExecutionService;
+        this.pollingState = pollingState;
     }
 
     @Scheduled(fixedDelay = 10000)
     public void runJobs() {
+        if (!pollingState.isEnabled()) {
+            return;
+        }
         List<ScheduleJob> tasks;
         try {
             tasks = riseApiService.fetchPendingTasks();
