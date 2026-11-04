@@ -58,6 +58,7 @@ curl -X POST https://api.dariodussin.com.br/webhook \
   - `url: https://api.dariodussin.com.br/webhook/message-check` (`{BASE_URL}/webhook/message-check`)
   - `events: ["SEND_MESSAGE", "MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE"]`
   - `headers: {}`
+  - `byEvents: false`
   - `base64: true`
 - **Pode repetir:** chamar de novo para a mesma instância apenas reaplica a mesma configuração.
 - **Token sensível:** o `token` devolvido é um segredo da instância. Não grave em log nem exponha a usuários finais.

@@ -324,19 +324,20 @@ public class EvolutionApiService {
     }
 
     public void setWebhook(String instance, String url, List<String> events) {
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("enabled", true);
-        payload.put("url", url);
-        payload.put("events", events);
-        payload.put("headers", Map.of());
-        payload.put("base64", true);
+        Map<String, Object> webhook = new HashMap<>();
+        webhook.put("enabled", true);
+        webhook.put("url", url);
+        webhook.put("events", events);
+        webhook.put("headers", Map.of());
+        webhook.put("byEvents", false);
+        webhook.put("base64", true);
 
         System.out.printf("[INFO] [Evolution] Setting webhook | Instance: %s | Events: %s%n", instance, events);
 
         try {
             evolutionClient.post()
                     .uri("/webhook/set/{instance}", instance)
-                    .bodyValue(payload)
+                    .bodyValue(Map.of("webhook", webhook))
                     .retrieve()
                     .onStatus(status -> status.isError(), response ->
                             response.bodyToMono(String.class).flatMap(body ->
