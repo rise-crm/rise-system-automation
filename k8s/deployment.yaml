@@ -49,16 +49,15 @@ spec:
                 secretKeyRef:
                   name: backend-secrets
                   key: EVOLUTION_KEY
-            - name: WEBHOOK_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: WEBHOOK_TOKEN
             - name: ADMIN_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: backend-secrets
                   key: ADMIN_TOKEN
+            - name: BASE_URL
+              value: https://api.dariodussin.com.br
+            - name: WEBHOOK_TOKEN_TTL
+              value: "600"
             - name: REDIS_HOST
               value: redis
             - name: REDIS_PORT

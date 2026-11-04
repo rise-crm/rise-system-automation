@@ -2,6 +2,9 @@ package com.dariodussin.whatsappautomationbackend.controller;
 
 import com.dariodussin.whatsappautomationbackend.config.WebhookRateLimiter;
 import com.dariodussin.whatsappautomationbackend.dto.EvolutionWebhookPayload;
+import com.dariodussin.whatsappautomationbackend.dto.SetWebhookRequest;
+import com.dariodussin.whatsappautomationbackend.dto.SetWebhookResponse;
+import com.dariodussin.whatsappautomationbackend.service.WebhookRegistrationService;
 import com.dariodussin.whatsappautomationbackend.service.WebhookService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -17,10 +20,38 @@ public class WebhookController {
 
     private final WebhookService webhookService;
     private final WebhookRateLimiter webhookRateLimiter;
+    private final WebhookRegistrationService webhookRegistrationService;
 
-    public WebhookController(WebhookService webhookService, WebhookRateLimiter webhookRateLimiter) {
+    public WebhookController(WebhookService webhookService,
+                             WebhookRateLimiter webhookRateLimiter,
+                             WebhookRegistrationService webhookRegistrationService) {
         this.webhookService = webhookService;
         this.webhookRateLimiter = webhookRateLimiter;
+        this.webhookRegistrationService = webhookRegistrationService;
+    }
+
+    @PostMapping
+    public ResponseEntity<SetWebhookResponse> setWebhook(@RequestBody SetWebhookRequest request) {
+        String instanceName = request.instanceName();
+        if (instanceName == null || instanceName.isBlank()) {
+            System.out.println("[WEBHOOK] set rejected | reason=missing_instance_name | status=400");
+            return ResponseEntity.badRequest().build();
+        }
+
+        try {
+            String token = webhookRegistrationService.register(instanceName);
+            if (token == null) {
+                System.out.printf("[WEBHOOK] set rejected | instance=%s | reason=instance_not_found | status=404%n",
+                        instanceName);
+                return ResponseEntity.notFound().build();
+            }
+            System.out.printf("[WEBHOOK] set done | instance=%s | status=200%n", instanceName);
+            return ResponseEntity.ok(new SetWebhookResponse(instanceName, token));
+        } catch (Exception e) {
+            System.err.printf("[WEBHOOK] set failed | instance=%s | status=502 | error=%s%n",
+                    instanceName, e.getClass().getSimpleName());
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
+        }
     }
 
     @PostMapping("/message-check")

@@ -51,7 +51,6 @@ jobs:
           EDGE_FUNCTIONS_KEY: ${{ secrets.EDGE_FUNCTIONS_KEY }}
           EVOLUTION_URL: ${{ secrets.EVOLUTION_URL }}
           EVOLUTION_KEY: ${{ secrets.EVOLUTION_KEY }}
-          WEBHOOK_TOKEN: ${{ secrets.WEBHOOK_TOKEN }}
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
         run: |
           set -euo pipefail
@@ -62,7 +61,6 @@ jobs:
             --from-literal=EDGE_FUNCTIONS_KEY="${EDGE_FUNCTIONS_KEY}" \
             --from-literal=EVOLUTION_URL="${EVOLUTION_URL}" \
             --from-literal=EVOLUTION_KEY="${EVOLUTION_KEY}" \
-            --from-literal=WEBHOOK_TOKEN="${WEBHOOK_TOKEN}" \
             --from-literal=ADMIN_TOKEN="${ADMIN_TOKEN}" \
             --dry-run=client -o yaml | $KC apply -f -
 

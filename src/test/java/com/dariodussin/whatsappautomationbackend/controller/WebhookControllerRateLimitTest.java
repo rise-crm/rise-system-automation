@@ -2,6 +2,7 @@ package com.dariodussin.whatsappautomationbackend.controller;
 
 import com.dariodussin.whatsappautomationbackend.config.WebhookRateLimiter;
 import com.dariodussin.whatsappautomationbackend.dto.EvolutionWebhookPayload;
+import com.dariodussin.whatsappautomationbackend.service.WebhookRegistrationService;
 import com.dariodussin.whatsappautomationbackend.service.WebhookService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -18,7 +19,8 @@ class WebhookControllerRateLimitTest {
     void excessReturns429WithoutCallingService() {
         WebhookService webhookService = mock(WebhookService.class);
         WebhookRateLimiter limiter = new WebhookRateLimiter(10, 1, () -> 0L);
-        WebhookController controller = new WebhookController(webhookService, limiter);
+        WebhookController controller = new WebhookController(webhookService, limiter,
+                mock(WebhookRegistrationService.class));
 
         var allowed = controller.messageCheck(payload());
         var limited = controller.messageCheck(payload());
