@@ -23,18 +23,24 @@ import java.security.NoSuchAlgorithmException;
 public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
 
     public static final String ADMIN_HEADER = "X-Admin-Token";
+    public static final String WEBHOOK_HEADER = "apikey";
     public static final String ROLE_ADMIN = "ADMIN";
     public static final String ROLE_WEBHOOK = "WEBHOOK";
     static final int MAX_WEBHOOK_BODY_BYTES = 1024 * 1024;
 
     private final String adminToken;
-    private final String webhookToken;
+    private final String evolutionKey;
+    private final InstanceTokenValidator instanceTokenValidator;
     private final JsonMapper jsonMapper;
     private final SecurityContextHolderStrategy contextHolder = SecurityContextHolder.getContextHolderStrategy();
 
-    public ApiKeyAuthenticationFilter(String adminToken, String webhookToken, JsonMapper jsonMapper) {
+    public ApiKeyAuthenticationFilter(String adminToken,
+                                      String evolutionKey,
+                                      InstanceTokenValidator instanceTokenValidator,
+                                      JsonMapper jsonMapper) {
         this.adminToken = adminToken;
-        this.webhookToken = webhookToken;
+        this.evolutionKey = evolutionKey;
+        this.instanceTokenValidator = instanceTokenValidator;
         this.jsonMapper = jsonMapper;
     }
 
@@ -58,13 +64,21 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
                 response.setStatus(HttpStatus.CONTENT_TOO_LARGE.value());
                 return;
             }
-            String apiKey = apiKeyFrom(cached.body());
-            if (tokenMatches(apiKey, webhookToken)) {
+            String apiKey;
+            boolean valid;
+            if (path.equals("/webhook")) {
+                apiKey = request.getHeader(WEBHOOK_HEADER);
+                valid = tokenMatches(apiKey, evolutionKey);
+            } else {
+                JsonNode body = readJson(cached.body());
+                apiKey = text(body, "apikey");
+                valid = tokenMatches(apiKey, evolutionKey)
+                        || instanceTokenValidator.isValid(text(body, "instance"), apiKey);
+            }
+            if (valid) {
                 authenticate("webhook", ROLE_WEBHOOK);
             } else {
-                String reason = webhookToken == null || webhookToken.isBlank()
-                        ? "webhook_token_not_configured"
-                        : apiKey == null ? "missing_apikey" : "apikey_mismatch";
+                String reason = apiKey == null || apiKey.isBlank() ? "missing_apikey" : "apikey_mismatch";
                 System.out.printf("[WEBHOOK-AUTH] Rejected | path=%s | reason=%s | body_bytes=%d | status=401%n",
                         path, reason, cached.body().length);
             }
@@ -82,16 +96,23 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
         contextHolder.setContext(context);
     }
 
-    private String apiKeyFrom(byte[] body) {
+    private JsonNode readJson(byte[] body) {
         if (body.length == 0) {
             return null;
         }
         try {
-            JsonNode apikey = jsonMapper.readTree(body).get("apikey");
-            return apikey != null && apikey.isString() ? apikey.asString() : null;
+            return jsonMapper.readTree(body);
         } catch (JacksonException e) {
             return null;
         }
+    }
+
+    private static String text(JsonNode node, String field) {
+        if (node == null) {
+            return null;
+        }
+        JsonNode value = node.get(field);
+        return value != null && value.isString() ? value.asString() : null;
     }
 
     private static boolean isUnder(String path, String prefix) {

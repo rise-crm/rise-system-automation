@@ -1,6 +1,7 @@
 package com.dariodussin.whatsappautomationbackend.config;
 
 import com.dariodussin.whatsappautomationbackend.security.ApiKeyAuthenticationFilter;
+import com.dariodussin.whatsappautomationbackend.security.InstanceTokenValidator;
 import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -20,9 +21,11 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http,
                                                    JsonMapper jsonMapper,
+                                                   InstanceTokenValidator instanceTokenValidator,
                                                    @Value("${admin.token}") String adminToken,
-                                                   @Value("${webhook.token}") String webhookToken) {
-        ApiKeyAuthenticationFilter apiKeyFilter = new ApiKeyAuthenticationFilter(adminToken, webhookToken, jsonMapper);
+                                                   @Value("${evolution.key}") String evolutionKey) {
+        ApiKeyAuthenticationFilter apiKeyFilter =
+                new ApiKeyAuthenticationFilter(adminToken, evolutionKey, instanceTokenValidator, jsonMapper);
 
         return http
                 .csrf(AbstractHttpConfigurer::disable)

@@ -1,5 +1,6 @@
 package com.dariodussin.whatsappautomationbackend.service;
 
+import com.dariodussin.whatsappautomationbackend.dto.EvolutionInstance;
 import com.dariodussin.whatsappautomationbackend.dto.GroupInfo;
 import com.dariodussin.whatsappautomationbackend.dto.GroupParticipant;
 import com.dariodussin.whatsappautomationbackend.dto.GroupParticipantsResponse;
@@ -289,6 +290,64 @@ public class EvolutionApiService {
         } catch (Exception e) {
             System.err.printf("[CRITICAL] [Evolution] Failed to remove participant | instance=%s | group=%s | participant=%s | error=%s: %s%n",
                     instance, groupJid, participantJid, e.getClass().getSimpleName(), e.getMessage());
+            throw e;
+        }
+    }
+
+    public EvolutionInstance fetchInstance(String instance) {
+        EvolutionInstance[] instances = evolutionClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/instance/fetchInstances")
+                        .queryParam("instanceName", instance)
+                        .build())
+                .exchangeToMono(response -> {
+                    if (response.statusCode().value() == 404) {
+                        return Mono.<EvolutionInstance[]>empty();
+                    }
+                    if (response.statusCode().isError()) {
+                        return response.bodyToMono(String.class).defaultIfEmpty("").flatMap(body ->
+                                Mono.error(new RuntimeException("Evolution API Error: " + body)));
+                    }
+                    return response.bodyToMono(EvolutionInstance[].class);
+                })
+                .block();
+
+        if (instances == null) {
+            return null;
+        }
+        for (EvolutionInstance candidate : instances) {
+            if (candidate != null && instance.equals(candidate.name())) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    public void setWebhook(String instance, String url, List<String> events) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("enabled", true);
+        payload.put("url", url);
+        payload.put("events", events);
+        payload.put("headers", Map.of());
+        payload.put("base64", true);
+
+        System.out.printf("[INFO] [Evolution] Setting webhook | Instance: %s | Events: %s%n", instance, events);
+
+        try {
+            evolutionClient.post()
+                    .uri("/webhook/set/{instance}", instance)
+                    .bodyValue(payload)
+                    .retrieve()
+                    .onStatus(status -> status.isError(), response ->
+                            response.bodyToMono(String.class).flatMap(body ->
+                                    Mono.error(new RuntimeException("Evolution API Error: " + body))))
+                    .bodyToMono(Void.class)
+                    .block();
+
+            System.out.printf("[SUCCESS] [Evolution] Webhook set for %s%n", instance);
+        } catch (Exception e) {
+            System.err.printf("[CRITICAL] [Evolution] Failed to set webhook for %s: %s%n",
+                    instance, e.getMessage());
             throw e;
         }
     }
