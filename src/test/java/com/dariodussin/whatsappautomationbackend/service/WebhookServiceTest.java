@@ -19,6 +19,7 @@ import java.util.Map;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -46,13 +47,17 @@ class WebhookServiceTest {
     @Mock
     private SpamTracker spamTracker;
 
+    @Mock
+    private RemovalLock removalLock;
+
     private JsonMapper jsonMapper;
     private WebhookService webhookService;
 
     @BeforeEach
     void setUp() {
         jsonMapper = JsonMapper.builder().build();
-        webhookService = new WebhookService(jsonMapper, evolutionApiService, riseApiService, spamTracker);
+        webhookService = new WebhookService(jsonMapper, evolutionApiService, riseApiService, spamTracker, removalLock);
+        lenient().when(removalLock.tryAcquire(anyString(), anyString())).thenReturn(true);
         when(riseApiService.getGuardianGroupCampaign(GROUP)).thenReturn(
                 new WorkerGroupCampaignResponse(GROUP, true, true, 1, List.of()));
         when(riseApiService.isGuardianInstanceForGroup(eq(GUARDIAN), any())).thenReturn(true);
@@ -237,6 +242,47 @@ class WebhookServiceTest {
 
         verify(evolutionApiService).deleteMessageForEveryone(eq(ADMIN_INSTANCE), any(), eq(MEMBER_PN));
         verify(evolutionApiService).removeGroupParticipant(ADMIN_INSTANCE, GROUP, MEMBER_PN);
+    }
+
+    @Test
+    void heldRemovalLockDeletesWithoutRemoving() {
+        when(removalLock.tryAcquire(GROUP, MEMBER_PN)).thenReturn(false);
+        when(evolutionApiService.findGroupParticipants(GUARDIAN, GROUP)).thenReturn(List.of(
+                participant(MEMBER_PN, null),
+                participant(ADMIN_PN, "admin")));
+
+        webhookService.checkMessage(upsert(MEMBER_PN, null));
+
+        verify(evolutionApiService).deleteMessageForEveryone(eq(ADMIN_INSTANCE), any(), eq(MEMBER_PN));
+        verify(evolutionApiService, never()).removeGroupParticipant(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void continuousSpamRequestsRemovalOnce() {
+        when(spamTracker.record(anyString(), anyString(), anyString())).thenReturn(true);
+        when(removalLock.tryAcquire(GROUP, MEMBER_PN)).thenReturn(true, false);
+        when(evolutionApiService.findGroupParticipants(GUARDIAN, GROUP)).thenReturn(List.of(
+                participant(MEMBER_PN, null),
+                participant(ADMIN_PN, "admin")));
+
+        webhookService.checkMessage(plainText(MEMBER_PN, null, "m10"));
+        webhookService.checkMessage(plainText(MEMBER_PN, null, "m11"));
+
+        verify(evolutionApiService, times(2)).deleteMessageForEveryone(eq(ADMIN_INSTANCE), any(), eq(MEMBER_PN));
+        verify(evolutionApiService, times(1)).removeGroupParticipant(ADMIN_INSTANCE, GROUP, MEMBER_PN);
+    }
+
+    @Test
+    void failedRemovalReleasesLock() {
+        when(evolutionApiService.findGroupParticipants(GUARDIAN, GROUP)).thenReturn(List.of(
+                participant(MEMBER_PN, null),
+                participant(ADMIN_PN, "admin")));
+        doThrow(new IllegalStateException("evolution down"))
+                .when(evolutionApiService).removeGroupParticipant(ADMIN_INSTANCE, GROUP, MEMBER_PN);
+
+        webhookService.checkMessage(upsert(MEMBER_PN, null));
+
+        verify(removalLock).release(GROUP, MEMBER_PN);
     }
 
     private static GroupParticipant participant(String id, String admin) {
