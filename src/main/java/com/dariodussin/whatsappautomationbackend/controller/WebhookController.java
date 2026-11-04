@@ -27,7 +27,7 @@ public class WebhookController {
     public ResponseEntity<Void> messageCheck(@RequestBody EvolutionWebhookPayload payload) {
         long started = System.currentTimeMillis();
         String event = payload.event();
-        System.out.printf("[WEBHOOK] message-check received | event=%s%n", event);
+        System.out.printf("[WEBHOOK] message-check received | event=%s | instance=%s%n", event, payload.instance());
 
         if (!webhookRateLimiter.tryAcquire()) {
             System.out.printf("[WEBHOOK] message-check rejected | event=%s | reason=rate_limit | status=429 | duration=%dms%n",
@@ -43,8 +43,9 @@ public class WebhookController {
                     event, System.currentTimeMillis() - started);
             return ResponseEntity.ok().build();
         } catch (Exception e) {
-            System.err.printf("[WEBHOOK] message-check failed | event=%s | status=500 | error=%s | duration=%dms%n",
-                    event, e.getClass().getSimpleName(), System.currentTimeMillis() - started);
+            System.err.printf("[WEBHOOK] message-check failed | event=%s | instance=%s | status=500 | error=%s: %s | duration=%dms%n",
+                    event, payload.instance(), e.getClass().getSimpleName(), e.getMessage(), System.currentTimeMillis() - started);
+            e.printStackTrace();
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }

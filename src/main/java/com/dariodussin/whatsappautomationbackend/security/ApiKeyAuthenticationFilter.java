@@ -54,11 +54,19 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
         if (isUnder(path, "/webhook")) {
             CachedBodyHttpServletRequest cached = CachedBodyHttpServletRequest.wrap(request, MAX_WEBHOOK_BODY_BYTES);
             if (cached == null) {
+                System.out.printf("[WEBHOOK-AUTH] Rejected | path=%s | reason=body_too_large | status=413%n", path);
                 response.setStatus(HttpStatus.CONTENT_TOO_LARGE.value());
                 return;
             }
-            if (tokenMatches(apiKeyFrom(cached.body()), webhookToken)) {
+            String apiKey = apiKeyFrom(cached.body());
+            if (tokenMatches(apiKey, webhookToken)) {
                 authenticate("webhook", ROLE_WEBHOOK);
+            } else {
+                String reason = webhookToken == null || webhookToken.isBlank()
+                        ? "webhook_token_not_configured"
+                        : apiKey == null ? "missing_apikey" : "apikey_mismatch";
+                System.out.printf("[WEBHOOK-AUTH] Rejected | path=%s | reason=%s | body_bytes=%d | status=401%n",
+                        path, reason, cached.body().length);
             }
             chain.doFilter(cached, response);
             return;

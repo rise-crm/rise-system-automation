@@ -174,32 +174,53 @@ public class EvolutionApiService {
     }
 
     public GroupInfo findGroupInfo(String instance, String groupJid) {
-        return evolutionClient.get()
-                .uri(uriBuilder -> uriBuilder
-                        .path("/group/findGroupInfos/{instance}")
-                        .queryParam("groupJid", groupJid)
-                        .build(instance))
-                .retrieve()
-                .onStatus(status -> status.isError(), responseStatus ->
-                        responseStatus.bodyToMono(String.class).flatMap(body ->
-                                Mono.error(new RuntimeException("Evolution API Error: " + body))))
-                .bodyToMono(GroupInfo.class)
-                .block();
+        long started = System.currentTimeMillis();
+        try {
+            GroupInfo info = evolutionClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/group/findGroupInfos/{instance}")
+                            .queryParam("groupJid", groupJid)
+                            .build(instance))
+                    .retrieve()
+                    .onStatus(status -> status.isError(), responseStatus ->
+                            responseStatus.bodyToMono(String.class).flatMap(body ->
+                                    Mono.error(new RuntimeException("Evolution API Error: " + body))))
+                    .bodyToMono(GroupInfo.class)
+                    .block();
+            System.out.printf("[INFO] [Evolution] findGroupInfos | instance=%s | group=%s | found=%s | duration=%dms%n",
+                    instance, groupJid, info != null, System.currentTimeMillis() - started);
+            return info;
+        } catch (Exception e) {
+            System.err.printf("[CRITICAL] [Evolution] findGroupInfos failed | instance=%s | group=%s | error=%s: %s%n",
+                    instance, groupJid, e.getClass().getSimpleName(), e.getMessage());
+            throw e;
+        }
     }
 
     public List<GroupParticipant> findGroupParticipants(String instance, String groupJid) {
-        GroupParticipantsResponse response = evolutionClient.get()
-                .uri(uriBuilder -> uriBuilder
-                        .path("/group/participants/{instance}")
-                        .queryParam("groupJid", groupJid)
-                        .build(instance))
-                .retrieve()
-                .onStatus(status -> status.isError(), responseStatus ->
-                        responseStatus.bodyToMono(String.class).flatMap(body ->
-                                Mono.error(new RuntimeException("Evolution API Error: " + body))))
-                .bodyToMono(GroupParticipantsResponse.class)
-                .block();
+        long started = System.currentTimeMillis();
+        GroupParticipantsResponse response;
+        try {
+            response = evolutionClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/group/participants/{instance}")
+                            .queryParam("groupJid", groupJid)
+                            .build(instance))
+                    .retrieve()
+                    .onStatus(status -> status.isError(), responseStatus ->
+                            responseStatus.bodyToMono(String.class).flatMap(body ->
+                                    Mono.error(new RuntimeException("Evolution API Error: " + body))))
+                    .bodyToMono(GroupParticipantsResponse.class)
+                    .block();
+        } catch (Exception e) {
+            System.err.printf("[CRITICAL] [Evolution] participants failed | instance=%s | group=%s | error=%s: %s%n",
+                    instance, groupJid, e.getClass().getSimpleName(), e.getMessage());
+            throw e;
+        }
 
+        int count = response == null || response.participants() == null ? 0 : response.participants().size();
+        System.out.printf("[INFO] [Evolution] participants | instance=%s | group=%s | count=%d | duration=%dms%n",
+                instance, groupJid, count, System.currentTimeMillis() - started);
         if (response == null || response.participants() == null) {
             return List.of();
         }
@@ -220,7 +241,8 @@ public class EvolutionApiService {
         payload.put("fromMe", false);
         payload.put("participant", participantJid);
 
-        System.out.println("[INFO] [Evolution] Deleting message");
+        System.out.printf("[INFO] [Evolution] Deleting message | instance=%s | group=%s | msgId=%s | participant=%s%n",
+                instance, key.remoteJid(), key.id(), participantJid);
 
         try {
             evolutionClient.method(HttpMethod.DELETE)
@@ -235,14 +257,15 @@ public class EvolutionApiService {
 
             System.out.println("[SUCCESS] [Evolution] Deleted message");
         } catch (Exception e) {
-            System.err.printf("[CRITICAL] [Evolution] Failed to delete message: %s%n",
-                    e.getClass().getSimpleName());
+            System.err.printf("[CRITICAL] [Evolution] Failed to delete message | instance=%s | msgId=%s | error=%s: %s%n",
+                    instance, key.id(), e.getClass().getSimpleName(), e.getMessage());
             throw e;
         }
     }
 
     public void removeGroupParticipant(String instance, String groupJid, String participantJid) {
-        System.out.println("[INFO] [Evolution] Removing participant");
+        System.out.printf("[INFO] [Evolution] Removing participant | instance=%s | group=%s | participant=%s%n",
+                instance, groupJid, participantJid);
 
         try {
             evolutionClient.post()
@@ -264,8 +287,8 @@ public class EvolutionApiService {
 
             System.out.println("[SUCCESS] [Evolution] Removed participant");
         } catch (Exception e) {
-            System.err.printf("[CRITICAL] [Evolution] Failed to remove participant: %s%n",
-                    e.getClass().getSimpleName());
+            System.err.printf("[CRITICAL] [Evolution] Failed to remove participant | instance=%s | group=%s | participant=%s | error=%s: %s%n",
+                    instance, groupJid, participantJid, e.getClass().getSimpleName(), e.getMessage());
             throw e;
         }
     }

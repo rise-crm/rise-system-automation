@@ -176,6 +176,7 @@ public class RiseApiService {
     }
 
     public WorkerGroupCampaignResponse getGuardianGroupCampaign(String groupId) {
+        long started = System.currentTimeMillis();
         try {
             WorkerGroupCampaignResponse response = edgeFunctionsClient.get()
                     .uri(uri -> uri.pathSegment("worker-group-campaign")
@@ -190,23 +191,62 @@ public class RiseApiService {
                     .bodyToMono(WorkerGroupCampaignResponse.class)
                     .block();
 
+            if (response == null) {
+                System.out.printf("[RISE] GET /worker-group-campaign | group=%s | empty body | duration=%dms%n",
+                        groupId, System.currentTimeMillis() - started);
+                return null;
+            }
+            System.out.printf("[RISE] GET /worker-group-campaign | group=%s | linked=%s | guardian_linked=%s | count=%s | matches=%s | duration=%dms%n",
+                    groupId, response.linked(), response.guardianLinked(), response.count(),
+                    describeMatches(response), System.currentTimeMillis() - started);
             return response;
         } catch (WebClientResponseException.NotFound e) {
+            System.out.printf("[RISE] GET /worker-group-campaign | group=%s | 404 | duration=%dms%n",
+                    groupId, System.currentTimeMillis() - started);
             return null;
         } catch (Exception e) {
-            System.err.printf("[RISE-ERROR] GET /worker-group-campaign failed: %s%n",
-                    e.getClass().getSimpleName());
+            System.err.printf("[RISE-ERROR] GET /worker-group-campaign failed | group=%s | error=%s: %s | duration=%dms%n",
+                    groupId, e.getClass().getSimpleName(), e.getMessage(), System.currentTimeMillis() - started);
             return null;
         }
     }
 
+    private static String describeMatches(WorkerGroupCampaignResponse response) {
+        if (response.matches() == null) {
+            return "null";
+        }
+        return response.matches().stream()
+                .map(m -> String.format("{campaign_id=%s, slug=%s, is_guardian=%s}",
+                        m.campaignId(), m.campaignSlug(), m.isGuardian()))
+                .toList()
+                .toString();
+    }
+
     public boolean isGuardianInstanceForGroup(String instanceName, WorkerGroupCampaignResponse groupCampaign) {
         if (instanceName == null || instanceName.isBlank() || groupCampaign == null) {
+            System.out.printf("[RISE] Guardian check | instance=%s | missing instance or group campaign%n", instanceName);
             return false;
         }
 
-        for (var match : groupCampaign.guardianMatches()) {
-            String campaignInstance = getInstanceNameByCampaignId(match.campaignId());
+        var guardianMatches = groupCampaign.guardianMatches();
+        if (guardianMatches.isEmpty()) {
+            System.out.printf("[RISE] Guardian check | instance=%s | group=%s | no match with is_guardian=true%n",
+                    instanceName, groupCampaign.groupId());
+            return false;
+        }
+
+        for (var match : guardianMatches) {
+            String campaignInstance;
+            try {
+                campaignInstance = getInstanceNameByCampaignId(match.campaignId());
+            } catch (Exception e) {
+                System.err.printf("[RISE-ERROR] Guardian check | campaign=%s | GET /worker-instance failed: %s: %s%n",
+                        match.campaignId(), e.getClass().getSimpleName(), e.getMessage());
+                throw e;
+            }
+            System.out.printf("[RISE] Guardian check | campaign=%s | campaign_instance=%s | webhook_instance=%s | match=%s%n",
+                    match.campaignId(), campaignInstance, instanceName,
+                    campaignInstance != null && campaignInstance.equalsIgnoreCase(instanceName));
             if (campaignInstance != null && campaignInstance.equalsIgnoreCase(instanceName)) {
                 return true;
             }
@@ -228,15 +268,21 @@ public class RiseApiService {
                     .bodyToMono(WorkerInstanceByGroup.class)
                     .block();
 
+            System.out.printf("[RISE] GET /worker-instance-by-group | group=%s | campaign=%s | instance=%s | status=%s%n",
+                    groupId,
+                    instance != null ? instance.campaignId() : null,
+                    instance != null ? instance.instanceName() : null,
+                    instance != null ? instance.status() : null);
             if (instance == null || instance.instanceName() == null || instance.instanceName().isBlank()) {
                 return null;
             }
             return instance;
         } catch (WebClientResponseException.NotFound e) {
+            System.out.printf("[RISE] GET /worker-instance-by-group | group=%s | 404%n", groupId);
             return null;
         } catch (Exception e) {
-            System.err.printf("[RISE-ERROR] GET /worker-instance-by-group failed: %s%n",
-                    e.getClass().getSimpleName());
+            System.err.printf("[RISE-ERROR] GET /worker-instance-by-group failed | group=%s | error=%s: %s%n",
+                    groupId, e.getClass().getSimpleName(), e.getMessage());
             return null;
         }
     }
