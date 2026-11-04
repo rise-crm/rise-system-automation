@@ -33,15 +33,18 @@ public class WebhookService {
     private final EvolutionApiService evolutionApiService;
     private final RiseApiService riseApiService;
     private final SpamTracker spamTracker;
+    private final RemovalLock removalLock;
 
     public WebhookService(JsonMapper jsonMapper,
                           EvolutionApiService evolutionApiService,
                           RiseApiService riseApiService,
-                          SpamTracker spamTracker) {
+                          SpamTracker spamTracker,
+                          RemovalLock removalLock) {
         this.jsonMapper = jsonMapper;
         this.evolutionApiService = evolutionApiService;
         this.riseApiService = riseApiService;
         this.spamTracker = spamTracker;
+        this.removalLock = removalLock;
     }
 
     public void checkMessage(EvolutionWebhookPayload payload) {
@@ -187,8 +190,15 @@ public class WebhookService {
                 deleteJid = participantJid;
             }
             evolutionApiService.deleteMessageForEveryone(adminInstanceName, key, deleteJid);
-            if (isScamTrigger || groupClosed || isSpam) {
-                evolutionApiService.removeGroupParticipant(adminInstanceName, groupJid, participantJid);
+            if (removalLock.tryAcquire(groupJid, participantJid)) {
+                try {
+                    evolutionApiService.removeGroupParticipant(adminInstanceName, groupJid, participantJid);
+                } catch (RuntimeException e) {
+                    removalLock.release(groupJid, participantJid);
+                    throw e;
+                }
+            } else {
+                System.out.printf("[WEBHOOK] Removal already requested | %s | participant: %s%n", ctx, participantJid);
             }
             System.out.printf("[WEBHOOK] Moderation done | %s | reason: %s%n", ctx, triggerReason);
         } catch (Exception e) {
