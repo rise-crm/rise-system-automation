@@ -1,220 +1,184 @@
 # Code review
 
-Revisão do worker de campanhas e do webhook de moderação do canal guardião, contra o código atual (`WebhookService`, `JobExecutionService`, `JobRunner`, clientes HTTP, Kubernetes e CI).
+Revisão completa do backend em 4 de novembro de 2026: worker de jobs, moderação do canal guardião, autenticação, clientes HTTP, Redis, Kubernetes e CI. Substitui a revisão anterior.
 
-O sistema faz duas coisas: dispara jobs de campanha na Evolution e modera grupos do canal guardião (apaga a mensagem e expulsa quem não é admin). A autenticação do webhook e o casamento de identidade do participante estão sólidos. Os problemas que mais importam estão na moderação em si, na confiabilidade do worker e no deploy.
+O sistema faz duas coisas: dispara jobs de campanha na Evolution e modera grupos do canal guardião (apaga a mensagem e expulsa quem não é admin). A identificação do remetente é sólida e bem testada. Os riscos que mais importam estão na moderação (mensagens que escapam e expulsões indevidas), na confiabilidade do worker (jobs duplicados ou presos) e no deploy (sem nenhuma barreira).
 
 ## Resumo
 
-| Severidade | Local | Problema |
-|---|---|---|
-| Alto | `WebhookService.extractVisibleText` | Citação e árvore inteira da mensagem entram na detecção de link e template. Resposta a um anúncio com URL expulsa quem só citou. |
-| Alto | `WebhookController`, `EvolutionClientConfig`, `EdgeFunctionsClientConfig` | Moderação bloqueia a thread HTTP. `WebClient` sem timeout. Sem deduplicação por id da mensagem. |
-| Alto | `JobExecutionService`, `JobRunner`, `RiseApiService.updateJobStatus` | Falha no meio da campanha marca o job inteiro como erro. Status engolido deixa o job reexecutável ou preso em `executing`. |
-| Alto | `.github/workflows/deploy.yml`, `Dockerfile` | Push na `master` publica sem `./gradlew test` e sem `kubectl rollout status`. Imagem só com tag `latest`. |
-| Médio | `WebhookService.isGroupJid` | Só `remoteJid` terminado em `@g.us` é grupo. `remoteJidAlt` não é lido. |
-| Médio | `WebhookController` | Cota só depois da autenticação. 429 descarta o evento. Tentativa de chave é ilimitada. |
-| Médio | `RiseApiService.isGuardianInstanceForGroup` | Uma chamada Rise por match, em toda mensagem de grupo vinculado. |
-| Médio | `WebhookService.isGroupClosed` | Falha ao ler o grupo trata como aberto. Mensagem sem link fica no ar. |
-| Médio | `WebhookService.canonicalClusterJid` | Expulsão prefere `jid`, mesmo `@lid`. `phoneNumber` só entra se `jid` e `id` forem vazios. |
-| Médio | `JobExecutionService` | `Thread.sleep` de 3–5s por grupo na única thread do `@Scheduled`. `metadata.group_id` é ignorado. Lista vazia conclui o job. |
-| Médio | `EvolutionApiService`, `JobRunner` | Log do worker grava trecho da mensagem, destino e body de erro da Evolution. |
-| Médio | `EvolutionApiService.sendMediaMessage` | `file_url` vai cru para a Evolution. Query string vira nome de arquivo. |
-| Médio | `k8s/network.yaml` | Ingress não declara TLS. HTTPS depende de configuração do Traefik fora deste repositório. |
-| Médio | `k8s/deployment.yaml`, `Dockerfile` | Sem probe. Heap de 75% sobre limite de 1Gi. Imagem `latest`. |
-| Médio | `build.gradle` | Kafka, `starter-web` duplicado e dotenv no classpath sem uso no código. |
-| Médio | `docs/fluxo_canal_guardiao.md` | Spam (10 msgs/min) e lock Redis não existem no código. `messages.update` só loga. |
-| Baixo | serviços em geral | Log por `System.out` / `System.err`. |
-| Baixo | `WebhookController.apiKeyMatches` | `MessageDigest.isEqual` revela o tamanho do token quando os comprimentos diferem. |
-| Baixo | `k8s/deployment.yaml`, `k8s/network.yaml` | O mesmo Service está nos dois manifestos. |
-| Baixo | `docs/SECURITY_REVIEW.md` | Ainda descreve o matcher antigo (`findParticipant`, primeiro alias). |
-| Baixo | `WebhookService.handleUpsert` | `fromMe` nulo segue como mensagem de terceiro. |
-| Baixo | `Dockerfile` | O glob `*[^plain].jar` só acerta porque a versão termina em `T` (`SNAPSHOT`). |
+| # | Severidade | Status | Local | Problema |
+|---|---|---|---|---|
+| 1 | Alto | Corrigido | `WebhookRegistrationService`, `EvolutionApiService.setWebhook` | Eventos sem uso consumiam a cota do webhook e `base64: true` estourava o limite de 1 MB com mídia. |
+| 2 | Alto | Corrigido | `InstanceTokenValidator` | Requisição sem autenticação disparava `fetchInstances` na Evolution, sem limite. |
+| 3 | Alto | Parcial | `EvolutionClientConfig`, `EdgeFunctionsClientConfig`, `WebhookController` | `WebClient` sem timeout. Moderação síncrona na thread HTTP. |
+| 4 | Alto | Aberto | `JobRunner`, `JobExecutionService`, `RiseApiService.updateJobStatus` | Job reexecutado quando o status falha, reenvio após falha parcial, `executing` preso. |
+| 5 | Alto | Aberto | `WebhookService.extractVisibleText`, `containsLink` | Citação e domínio casual expulsam quem não mandou link. |
+| 6 | Alto | Aberto | `.github/workflows/deploy.yml`, `Dockerfile`, `k8s/deployment.yaml` | Deploy sem testes, sem `rollout status`, sem probe e com imagem `latest`. |
+| 7 | Médio | Aberto | `ApiKeyAuthenticationFilter`, `WebhookService` | Token de instância guardiã basta para forjar eventos e expulsar membros. |
+| 8 | Médio | Aberto | `WebhookController.setWebhook` | `POST /webhook` exige a `EVOLUTION_KEY`, a chave mestra da Evolution. |
+| 9 | Médio | Aberto | `ScheduleJob`, `JobType`, `JobMetadata` | Um job com dado inesperado derruba a leitura de todos. |
+| 10 | Médio | Aberto | `JobPollingState`, `k8s/redis.yaml` | Pausa do polling se desfaz com o Redis fora do ar ou reiniciado. |
+| 11 | Médio | Aberto | `WebhookService`, `EvolutionApiService`, `RiseApiService` | Telefones, JIDs e trechos de mensagem nos logs. |
+| 12 | Médio | Aberto | vários | Itens da revisão anterior ainda abertos. |
+| 13 | Baixo | Aberto | vários | Ver tabela no fim. |
 
-**Ordem sugerida:** (1) detectar link e template só no texto da mensagem nova; (2) timeout no `WebClient`, processar o webhook fora da thread HTTP e deduplicar por id da mensagem; (3) claim de job com falha de status interrompendo a execução e recuperação de `executing` abandonado; (4) `./gradlew test` no pipeline, imagem por digest ou tag de commit, e `kubectl rollout status`.
+**Ordem sugerida:** (1) detectar link e template só no texto da mensagem nova; (2) tratar o job como claim e recuperar `executing` abandonado; (3) testes no pipeline, imagem por tag de commit, readiness e `rollout status`; (4) moderação fora da thread HTTP.
 
 ---
 
 ## O que está sólido
 
-- `POST /webhook/message-check` só segue depois de comparar `apikey` com `WEBHOOK_TOKEN` (`MessageDigest.isEqual`). Token ausente, nulo ou em branco rejeita tudo. Acima da cota a resposta é 429, sem corpo e sem chamar Evolution nem Rise.
-- O Ingress publica só `/webhook`. O Service é `ClusterIP`. O container sobe como usuário não-root. Os segredos vêm de `backend-secrets`.
-- A expulsão não usa o JID cru do payload. O código monta um cluster de identidade na lista da Evolution, recusa admin, conflito e JID ambíguo, e remove o JID canônico do participante casado. Os testes cobrem o bypass antigo (não-admin em `participant`, admin em `participantAlt`).
+- O remetente é identificado por um cluster de identidade montado com a lista de participantes da Evolution. O código recusa admin, conflito e JID ambíguo, e expulsa o JID canônico do participante, não o JID cru do payload. Os testes cobrem admin forjado em `participantAlt` e LID versus telefone.
+- A regra de spam (10 mensagens por minuto) usa uma janela no Redis deduplicada por id da mensagem.
+- A expulsão tem trava no Redis por grupo e contato durante 5 minutos, então gatilhos seguidos pedem um único ban.
+- A comparação de tokens é feita em tempo constante sobre hash SHA-256 e não revela o tamanho do token.
+- O Ingress tem TLS via cert-manager e publica só `/webhook` e `/admin`. Qualquer outra rota recebe 401.
+- O Redis roda sem root, com sistema de arquivos somente leitura e senha gerada no cluster.
 
 ---
 
-## 1. Alto — Citação e domínio casual expulsam o participante
+## 1. Alto, corrigido: eventos sem uso e mídia acima de 1 MB
+
+**Arquivos:** `WebhookRegistrationService`, `EvolutionApiService.setWebhook`
+
+O webhook assinava `SEND_MESSAGE`, `MESSAGES_UPSERT`, `MESSAGES_UPDATE` e `MESSAGES_DELETE`, mas o código só modera `messages.upsert`. `MESSAGES_UPDATE` dispara a cada confirmação de entrega e leitura, várias vezes por mensagem em grupos grandes. Todos os eventos gastavam a mesma cota global de 10 requisições por segundo, e acima dela o `messages.upsert` recebia 429 e era perdido.
+
+Com `base64: true`, a Evolution embutia a mídia no callback, que tem limite de 1 MB. Imagem ou vídeo maior recebia 413, então golpe com link na legenda de uma imagem nunca era analisado. O conteúdo em base64 não é usado pelo código.
+
+**Correção:** o webhook agora assina só `MESSAGES_UPSERT`, com `base64: false`. Instâncias já configuradas só mudam quando o `POST /webhook` for chamado de novo para cada uma.
+
+---
+
+## 2. Alto, corrigido: busca de token sem limite
+
+**Arquivo:** `InstanceTokenValidator`
+
+O filtro de autenticação roda antes do limite de taxa do controller. Uma requisição sem autenticação, com qualquer `instance` e qualquer `apikey`, disparava `fetchInstances` na Evolution. Nomes inventados nunca entravam no cache, então cada requisição virava uma chamada.
+
+**Correção:** a busca na Evolution, feita só quando o token não está em cache, tem um limite próprio (`WEBHOOK_TOKEN_LOOKUP_PERMITS_PER_SECOND`, padrão 1 por segundo, rajada `WEBHOOK_TOKEN_LOOKUP_BURST` de 10). Callbacks com token em cache ou com `EVOLUTION_KEY` não passam por esse limite. Respostas "não encontrado" não são guardadas: o atacante escolhe os nomes e encheria a memória.
+
+---
+
+## 3. Alto, parcial: timeout e moderação síncrona
+
+**Arquivos:** `EvolutionClientConfig`, `EdgeFunctionsClientConfig`, `WebhookController.messageCheck`
+
+Os dois `WebClient` não tinham timeout, e todas as chamadas usam `.block()`. Uma Evolution ou Rise lenta prendia as threads do Tomcat no webhook e prendia para sempre a única thread do `@Scheduled`, parando o polling em silêncio.
+
+**Corrigido:** timeout de conexão (`HTTP_CONNECT_TIMEOUT_MS`, padrão 5 s) e de resposta (`EVOLUTION_RESPONSE_TIMEOUT_MS`, padrão 30 s; `EDGE_FUNCTIONS_RESPONSE_TIMEOUT_MS`, padrão 15 s) nos dois clientes.
+
+**Aberto:** cada mensagem de grupo faz de 4 a 7 chamadas à Rise e à Evolution antes de responder 200. A moderação deveria sair da thread HTTP. Não há deduplicação por id da mensagem antes de apagar: a trava da expulsão evita ban duplicado, mas um reenvio do evento apaga e consulta tudo de novo. A trava de expulsão libera em caso de Redis fora do ar.
+
+Timeout no envio de um job pode marcar como erro um envio que a Evolution concluiu. Com o item 4 aberto, reprocessar esse job reenvia a mensagem.
+
+---
+
+## 4. Alto, aberto: job duplicado, parcial ou preso
+
+**Arquivos:** `JobRunner.runJobs`, `JobExecutionService.handleTaskExecution`, `RiseApiService.updateJobStatus`, `JobRetryRunner`
+
+- `updateJobStatus` engole qualquer erro. Se o `PATCH` para `executing` e depois para `completed` falharem, o job continua `pending` e é reenviado para todos os grupos 10 s depois.
+- `JobExecutionService` para no primeiro grupo que falhar. Os anteriores já receberam a mensagem, o job inteiro vira `error`, e reprocessá-lo reenvia para todos.
+- Se o pod morrer durante a execução, o job fica `executing` para sempre. O `JobRetryRunner` está inteiro comentado.
+- `metadata.group_id` é ignorado: cada job vai para todos os grupos da campanha. Campanha sem grupos é marcada `completed` sem ter enviado nada.
+- A pausa de 3 a 5 s por grupo roda na única thread do agendador.
+
+**Correção sugerida:** abortar o job se a marcação de `executing` falhar, registrar os grupos já enviados para não reenviar, e varrer `executing` antigo.
+
+---
+
+## 5. Alto, aberto: expulsão por citação e domínio casual
 
 **Arquivo:** `WebhookService.extractVisibleText`, `containsLink`, `containsTemplatePayload`
 
-`extractVisibleText` percorre a árvore inteira da mensagem e do `contextInfo`. Qualquer campo `conversation`, `text`, `caption`, `matchedText`, `canonicalUrl` ou `description` entra na detecção. No payload da Evolution, a mensagem citada fica dentro de `contextInfo.quotedMessage`. Uma resposta “ok” a um anúncio com URL casa o link e segue para apagar e expulsar.
+`extractVisibleText` percorre a árvore inteira da mensagem e o `contextInfo`, inclusive a mensagem citada em `quotedMessage`. Responder "ok" a um anúncio com URL apaga e expulsa. A detecção de template dispara com qualquer chave que contenha `template`, em qualquer nível. O regex de domínio pega `empresa.com`, e-mails e sufixos como `.me`, `.co` e `.app`.
 
-O mesmo vale para template: qualquer chave cujo nome contém `template`, em qualquer nível, dispara a moderação.
-
-O regex de domínio também é largo: `empresa.com`, e-mail e sufixos como `.me`, `.co` e `.app` contam como golpe.
-
-Em grupo fechado, qualquer texto de não-admin já apaga e expulsa. Isso está alinhado com `docs/fluxo_canal_guardiao.md`. O risco extra é expulsar no grupo aberto por citação ou por domínio casual.
+**Correção sugerida:** analisar só o texto e a legenda da mensagem nova, fora de `quotedMessage` e `contextInfo`, e restringir o regex a URLs com esquema, `www.` e encurtadores.
 
 ---
 
-## 2. Alto — Webhook síncrono, sem timeout e sem idempotência
+## 6. Alto, aberto: deploy sem barreira
 
-**Arquivos:** `WebhookController.messageCheck`, `EvolutionClientConfig`, `EdgeFunctionsClientConfig`, `EvolutionApiService`, `RiseApiService`
+**Arquivos:** `.github/workflows/deploy.yml`, `Dockerfile`, `k8s/deployment.yaml`
 
-Cada evento autenticado faz várias chamadas bloqueantes (Rise, participantes, delete, remove) antes do 200. A cota é 10 req/s com rajada de 100, por processo. Os `WebClient` não configuram timeout de conexão nem de resposta. Uma Evolution lenta ocupa threads do Tomcat até o pool encher. Não há probe de liveness no Deployment, então o Kubernetes continua tratando o pod como saudável.
+O workflow não roda os testes e o `Dockerfile` compila com `-x test`. O deploy termina em `rollout restart`, sem `rollout status`. A imagem é sempre `latest`, sem rollback. O backend não tem readiness nem liveness, e o Actuator não está nas dependências: no rollout o tráfego vai para o pod antes de o Spring subir.
 
-Não há trava por `messageId`. `docs/fluxo_canal_guardiao.md` pede lock de 5s em Redis por `groupJid` + participante. A Evolution reenvia o mesmo evento e as duas passagens moderam de novo.
-
----
-
-## 3. Alto — Job parcial, status engolido e `executing` preso
-
-**Arquivos:** `JobExecutionService.handleTaskExecution`, `JobRunner.runJobs`, `RiseApiService.updateJobStatus`, `JobRetryRunner`
-
-`JobExecutionService` manda para todos os grupos e, no primeiro erro, aborta o restante. Os grupos anteriores já receberam a mensagem. `JobRunner` marca o job inteiro como `error`.
-
-`JobRetryRunner` está comentado por completo, então não há retry automático. Se alguém recolocar o job em `pending`, a campanha inteira recebe de novo.
-
-`updateJobStatus` engole a exceção. Se o `PATCH` para `executing` ou `completed` falhar, o job continua `pending` e o ciclo de 10s dispara outra vez. Se o processo morrer depois de `executing`, nada varre esse estado: o fetch só pede `pending`, e o retry de `error` não está ativo.
-
-Lista de grupos vazia não lança erro: o job é marcado `completed` sem ter enviado nada.
-
-`metadata.group_id` é ignorado. Cada job vai para todos os grupos da campanha. Se a edge function já cria um job por grupo, cada execução multiplica o envio pelo número de grupos.
+O `contextLoads` falha sem `EDGE_FUNCTIONS_KEY`. Para virar barreira, o teste precisa de propriedades de teste.
 
 ---
 
-## 4. Alto — Deploy sem teste e sem espera do rollout
+## 7. Médio, aberto: token de instância permite forjar eventos
 
-**Arquivos:** `.github/workflows/deploy.yml`, `Dockerfile`
+**Arquivos:** `ApiKeyAuthenticationFilter`, `WebhookService.handleUpsert`
 
-Todo push na `master` faz build e `kubectl apply`. O workflow não roda `./gradlew test` nem `kubectl rollout status`. A imagem publicada é só `ezdussin/whatsapp-automation-backend:latest`.
-
-O `Dockerfile` gera o jar com `-x test`. Os testes de bypass de admin existem e não travam o deploy. Tag `latest` dificulta rollback.
+`/webhook/message-check` aceita o token da instância citada no payload e confia no conteúdo do evento sem confirmar a mensagem na Evolution. Quem tem o token de uma instância guardiã (visível no painel da Evolution e devolvido pelo `POST /webhook`) pode forjar um evento com qualquer `participant` e fazer o sistema expulsar qualquer membro não admin. Antes, isso exigia um segredo dedicado.
 
 ---
 
-## 5. Médio — `remoteJidAlt` ignorado
+## 8. Médio, aberto: chave mestra da Evolution fora do servidor
 
-**Arquivo:** `WebhookService.isGroupJid`, `MessageKey`
+**Arquivo:** `WebhookController.setWebhook`, `ApiKeyAuthenticationFilter`
 
-Só `remoteJid` terminado em `@g.us` entra na moderação. `remoteJidAlt` existe no record e não é lido. Evento em que o grupo vem no alt é ignorado.
-
----
-
-## 6. Médio — Cota depois da auth, e 429 descarta moderação
-
-**Arquivo:** `WebhookController.messageCheck`, `WebhookRateLimiter`
-
-Request sem token não consome a cota, então a tentativa de chave é ilimitada. O corpo JSON já foi parseado antes da comparação. Request com token acima da cota recebe 429 e a mensagem não é moderada. Este código não garante retry da Evolution nesse caso.
+O `POST /webhook` exige a `EVOLUTION_KEY`. Qualquer sistema que configure webhooks precisa guardar a chave que controla todas as instâncias. O `ADMIN_TOKEN`, numa rota em `/admin`, limitaria o estrago de um vazamento.
 
 ---
 
-## 7. Médio — Instância guardiã em N chamadas
+## 9. Médio, aberto: um job inválido trava todos
 
-**Arquivo:** `RiseApiService.isGuardianInstanceForGroup`
+**Arquivos:** `ScheduleJob`, `JobType`, `JobMetadata`, `RiseApiService.fetchPendingTasks`
 
-Para cada match guardião o método chama `getInstanceNameByCampaignId` em sequência. Toda mensagem de grupo vinculado paga isso, inclusive “oi” em grupo aberto, porque o anúncio fechado só é conhecido depois do lookup.
-
----
-
-## 8. Médio — Grupo fechado falha aberto
-
-**Arquivo:** `WebhookService.isGroupClosed`
-
-Exceção em `findGroupInfo` trata o grupo como aberto. Mensagem sem link nesse grupo fica no ar.
+Um `type` desconhecido faz a leitura da lista inteira falhar, e o polling falha a cada 10 s até alguém corrigir o job na Rise. `mention_all` nulo, num `boolean` primitivo, pode ter o mesmo efeito conforme a configuração do Jackson. Ler a lista como JSON genérico e converter job a job isola o item ruim.
 
 ---
 
-## 9. Médio — Expulsão prefere `@lid`
+## 10. Médio, aberto: pausa do polling não é confiável
 
-**Arquivo:** `WebhookService.canonicalClusterJid`
+**Arquivos:** `JobPollingState.isEnabled`, `k8s/redis.yaml`
 
-A ordem é `jid`, depois `id`, depois `phoneNumber`. `phoneNumber` só entra se `jid` e `id` forem vazios. Se a Evolution só remove pelo número `@s.whatsapp.net`, a expulsão falha com o LID. O `catch` registra a classe da exceção, sem a mensagem da API.
-
----
-
-## 10. Médio — Scheduler bloqueado e fan-out da campanha
-
-**Arquivo:** `JobExecutionService.handleTaskExecution`
-
-Há `Thread.sleep` de 3–5s por grupo. O pool padrão do `@Scheduled` tem uma thread. Uma campanha com dezenas de grupos segura a fila inteira. O `fixedDelay` de 10s só começa quando essa thread libera.
-
-`metadata.group_id` não filtra o destino. Lista de grupos vazia conclui o job (ver item 3).
+`isEnabled` devolve `true` quando o Redis está fora do ar. O Redis roda sem persistência (`emptyDir`, `--save ""`), então depois de reiniciar a chave some e o polling volta ligado. Um "pausar campanhas" pode ser desfeito sem ninguém perceber.
 
 ---
 
-## 11. Médio — PII no log do worker
+## 11. Médio, aberto: dados pessoais nos logs
 
-**Arquivos:** `EvolutionApiService.sendTextMessage`, `JobRunner`, `JobExecutionService`
+**Arquivos:** `WebhookService`, `EvolutionApiService`, `RiseApiService`
 
-O webhook de moderação evita instance, JID, push name e trecho da mensagem. O worker ainda grava os primeiros 30 caracteres do texto, o número de destino e o body de erro da Evolution no stdout e em `error_message` no Rise.
-
----
-
-## 12. Médio — `file_url` cru na Evolution
-
-**Arquivo:** `EvolutionApiService.sendMediaMessage`
-
-`file_url` vira o campo `media`. O nome do arquivo sai de `Paths.get(url)`. Query string de URL assinada vira nome de arquivo. No Windows, `Paths.get` de URL com `https:` quebra; no container Linux, não. Quem consegue criar job na Rise escolhe a URL que a Evolution busca.
+Os logs de diagnóstico gravam telefones e JIDs de participantes, inclusive o cluster de identidade com telefone. O worker grava os primeiros 30 caracteres de cada mensagem enviada. O corpo de erro da Evolution vai inteiro para o `error_message` na Rise. Pesa para a LGPD.
 
 ---
 
-## 13. Médio — TLS do Ingress fora do repositório
-
-**Arquivo:** `k8s/network.yaml`
-
-O Ingress não declara certificado. O `WEBHOOK_TOKEN` viaja no JSON do webhook. HTTPS só existe se o Traefik do cluster terminar TLS fora deste manifesto.
-
----
-
-## 14. Médio — Probe, memória e tag da imagem
-
-**Arquivos:** `k8s/deployment.yaml`, `Dockerfile`
-
-Não há liveness nem readiness. `-XX:MaxRAMPercentage=75.0` sobre o limite de 1024Mi deixa pouca margem para metaspace e threads. A imagem é `latest` com `imagePullPolicy: Always`.
-
----
-
-## 15. Médio — Dependências sem uso
-
-**Arquivo:** `build.gradle`
-
-`spring-boot-starter-kafka` entra no classpath sem consumidor no código (broker default `localhost:9092`). Há `spring-boot-starter-web` junto de `spring-boot-starter-webmvc`, e `spring-dotenv` junto de `dotenv-java`.
-
----
-
-## 16. Médio — Regras do fluxo guardião ausentes
-
-**Arquivos:** `docs/fluxo_canal_guardiao.md`, `WebhookService.handleUpdate`
-
-O documento pede spam (10 mensagens em menos de 1 minuto) e lock temporário no Redis. Nenhum dos dois está no código. `messages.update` só escreve log.
-
----
-
-## 17. Baixo
+## 12. Médio, aberto: itens da revisão anterior
 
 | Local | Problema |
 |---|---|
-| Serviços em geral | Log por `System.out` / `System.err`, sem nível nem id de correlação. |
-| `WebhookController.apiKeyMatches` | `MessageDigest.isEqual` revela o tamanho do token quando os comprimentos diferem. |
-| `k8s/deployment.yaml`, `k8s/network.yaml` | O mesmo Service está nos dois manifestos. O apply seguinte vence se eles divergirem. |
-| `docs/SECURITY_REVIEW.md` | Ainda descreve `findParticipant` e o primeiro alias. O código atual usa cluster de identidade e recusa conflito. |
-| `WebhookService.handleUpsert` | `fromMe` nulo segue o fluxo como mensagem de terceiro. |
-| `Dockerfile` | O glob `*[^plain].jar` é uma classe de caracteres. O boot jar atual entra porque `SNAPSHOT` termina em `T`. |
+| `RiseApiService.isGuardianInstanceForGroup` | Uma chamada à Rise por campanha vinculada, em toda mensagem de grupo, sem cache. |
+| `WebhookService.isGroupClosed` | Falha ao ler o grupo trata como aberto. Mensagem sem link fica no ar. |
+| `WebhookService.canonicalClusterJid` | Expulsão prefere o JID `@lid` ao telefone. Confirmar se a Evolution expulsa por `@lid`. |
+| `WebhookService.isGroupJid` | `remoteJidAlt` é ignorado. |
+| `EvolutionApiService.sendMediaMessage` | `file_url` vai cru para a Evolution. Query string vira nome de arquivo. |
+| `build.gradle` | Kafka, `starter-web` duplicado, dois pacotes de dotenv e `jackson-databind` 2 junto do Jackson 3, sem uso. |
+| `Dockerfile` | `MaxRAMPercentage=75` sobre limite de 1 GiB deixa pouca margem. |
+
+---
+
+## 13. Baixo
+
+| Local | Problema |
+|---|---|
+| Serviços em geral | Log por `System.out` e `System.err`, sem nível nem id de correlação. |
+| `JobRetryRunner.java` | Arquivo inteiro comentado. |
+| `k8s/deployment.yaml`, `k8s/network.yaml` | O mesmo `Service` nos dois manifestos. |
+| `k8s/traefik-config.yaml` | Emissor ACME do Traefik além do cert-manager, fora do pipeline, com e-mail pessoal. |
+| `JobExecutionService` | Interrupção do `Thread.sleep` engolida pelo `catch (Exception)`. |
+| `WebhookController.setWebhook` | 502 para qualquer exceção, inclusive bug interno. |
+| `WebhookService.handleUpsert` | `fromMe` nulo segue como mensagem de terceiro. |
+| `Dockerfile` | O glob `*[^plain].jar` só acerta porque a versão termina em `T`. |
+| `docs/SECURITY_REVIEW.md` | Ainda descreve o `WEBHOOK_TOKEN`, removido. |
 
 ---
 
 ## Testes
 
-Há cobertura do admin forjado, de LID versus telefone e da cota 401/429 (`WebhookServiceTest`, `WebhookControllerRateLimitTest`, `WebhookRateLimiterTest`).
+Há cobertura de identidade do remetente, spam, trava de expulsão, autenticação do webhook, cache e limite da busca de token, timeout do cliente HTTP, leitura de `fetchInstances` e corpo do `webhook/set`.
 
-Não há teste de contrato JSON com o snake_case da Rise (`campaign_id`, `guardian_linked`, `send_message`), de citação com link, de grupo fechado, de job parcial, nem de timeout do `WebClient`.
-
----
-
-## Plano
-
-1. Detectar link e template só no texto da mensagem nova, fora de `quotedMessage` / `contextInfo`.
-2. Timeout no `WebClient`, processar o webhook fora da thread HTTP e deduplicar por id da mensagem.
-3. Tratar o job como claim: falha de status interrompe a execução; sucesso parcial não reenvia o grupo que já passou; recuperar `executing` abandonado.
-4. Rodar `./gradlew test` no pipeline e publicar a imagem por digest ou tag de commit, esperando `rollout status`.
+Faltam testes de citação com link, domínio casual e e-mail, grupo fechado, job parcial, falha de status, `type` desconhecido e contrato JSON da Rise (`campaign_id`, `guardian_linked`, `send_message`).

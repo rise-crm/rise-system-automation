@@ -10,9 +10,7 @@ import java.util.List;
 public class WebhookRegistrationService {
 
     static final String CALLBACK_PATH = "/webhook/message-check";
-    static final List<String> EVENTS = List.of(
-            "SEND_MESSAGE", "MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE"
-    );
+    static final List<String> EVENTS = List.of("MESSAGES_UPSERT");
 
     private final EvolutionApiService evolutionApiService;
     private final String callbackUrl;

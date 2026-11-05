@@ -14,6 +14,12 @@ public class EdgeFunctionsClientConfig {
     @Value("${edge-functions.key}")
     private String edgeFunctionsKey;
 
+    @Value("${http.connect-timeout-ms}")
+    private int connectTimeoutMs;
+
+    @Value("${edge-functions.response-timeout-ms}")
+    private long responseTimeoutMs;
+
     @Bean
     public WebClient edgeFunctionsClient() {
         String baseUrl = edgeFunctionsUrl.endsWith("/")
@@ -22,6 +28,7 @@ public class EdgeFunctionsClientConfig {
 
         return WebClient.builder()
                 .baseUrl(baseUrl)
+                .clientConnector(HttpConnectors.withTimeouts(connectTimeoutMs, responseTimeoutMs))
                 .defaultHeader("Content-Type", "application/json")
                 .defaultHeader("x-api-token", edgeFunctionsKey)
                 .build();

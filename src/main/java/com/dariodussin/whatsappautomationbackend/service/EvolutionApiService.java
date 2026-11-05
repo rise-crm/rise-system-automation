@@ -330,7 +330,7 @@ public class EvolutionApiService {
         webhook.put("events", events);
         webhook.put("headers", Map.of());
         webhook.put("byEvents", false);
-        webhook.put("base64", true);
+        webhook.put("base64", false);
 
         System.out.printf("[INFO] [Evolution] Setting webhook | Instance: %s | Events: %s%n", instance, events);
 

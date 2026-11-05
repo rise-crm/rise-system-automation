@@ -56,9 +56,9 @@ curl -X POST https://api.dariodussin.com.br/webhook \
 - **Fixo no servidor:** o cliente não escolhe URL nem eventos. O backend sempre configura a instância com:
   - `enabled: true`
   - `url: https://api.dariodussin.com.br/webhook/message-check` (`{BASE_URL}/webhook/message-check`)
-  - `events: ["SEND_MESSAGE", "MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE"]`
+  - `events: ["MESSAGES_UPSERT"]`
   - `headers: {}`
   - `byEvents: false`
-  - `base64: true`
+  - `base64: false`
 - **Pode repetir:** chamar de novo para a mesma instância apenas reaplica a mesma configuração.
 - **Token sensível:** o `token` devolvido é um segredo da instância. Não grave em log nem exponha a usuários finais.
