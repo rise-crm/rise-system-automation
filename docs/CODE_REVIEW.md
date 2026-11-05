@@ -12,7 +12,7 @@ O sistema faz duas coisas: dispara jobs de campanha na Evolution e modera grupos
 | 2 | Alto | Corrigido | `InstanceTokenValidator` | Requisição sem autenticação disparava `fetchInstances` na Evolution, sem limite. |
 | 3 | Alto | Parcial | `EvolutionClientConfig`, `EdgeFunctionsClientConfig`, `WebhookController` | `WebClient` sem timeout. Moderação síncrona na thread HTTP. |
 | 4 | Alto | Aberto | `JobRunner`, `JobExecutionService`, `RiseApiService.updateJobStatus` | Job reexecutado quando o status falha, reenvio após falha parcial, `executing` preso. |
-| 5 | Alto | Aberto | `WebhookService.extractVisibleText`, `containsLink` | Citação e domínio casual expulsam quem não mandou link. |
+| 5 | Alto | Corrigido | `WebhookService.extractOwnText`, `containsLink` | Citação e e-mail expulsavam quem não mandou link. |
 | 6 | Alto | Aberto | `.github/workflows/deploy.yml`, `Dockerfile`, `k8s/deployment.yaml` | Deploy sem testes, sem `rollout status`, sem probe e com imagem `latest`. |
 | 7 | Médio | Aberto | `ApiKeyAuthenticationFilter`, `WebhookService` | Token de instância guardiã basta para forjar eventos e expulsar membros. |
 | 8 | Médio | Aberto | `WebhookController.setWebhook` | `POST /webhook` exige a `EVOLUTION_KEY`, a chave mestra da Evolution. |
@@ -22,7 +22,7 @@ O sistema faz duas coisas: dispara jobs de campanha na Evolution e modera grupos
 | 12 | Médio | Aberto | vários | Itens da revisão anterior ainda abertos. |
 | 13 | Baixo | Aberto | vários | Ver tabela no fim. |
 
-**Ordem sugerida:** (1) detectar link e template só no texto da mensagem nova; (2) tratar o job como claim e recuperar `executing` abandonado; (3) testes no pipeline, imagem por tag de commit, readiness e `rollout status`; (4) moderação fora da thread HTTP.
+**Ordem sugerida:** (1) tratar o job como claim e recuperar `executing` abandonado; (2) testes no pipeline, imagem por tag de commit, readiness e `rollout status`; (3) moderação fora da thread HTTP.
 
 ---
 
@@ -87,13 +87,15 @@ Timeout no envio de um job pode marcar como erro um envio que a Evolution conclu
 
 ---
 
-## 5. Alto, aberto: expulsão por citação e domínio casual
+## 5. Alto, corrigido: expulsão por citação e e-mail
 
-**Arquivo:** `WebhookService.extractVisibleText`, `containsLink`, `containsTemplatePayload`
+**Arquivo:** `WebhookService.extractOwnText`, `containsLink`, `containsTemplatePayload`
 
-`extractVisibleText` percorre a árvore inteira da mensagem e o `contextInfo`, inclusive a mensagem citada em `quotedMessage`. Responder "ok" a um anúncio com URL apaga e expulsa. A detecção de template dispara com qualquer chave que contenha `template`, em qualquer nível. O regex de domínio pega `empresa.com`, e-mails e sufixos como `.me`, `.co` e `.app`.
+A extração de texto percorria a árvore inteira da mensagem e o `contextInfo`, inclusive a mensagem citada em `quotedMessage`. Responder "ok" a um anúncio com URL apagava e expulsava. A detecção de template também olhava dentro da citação. O regex de domínio contava e-mails como link.
 
-**Correção sugerida:** analisar só o texto e a legenda da mensagem nova, fora de `quotedMessage` e `contextInfo`, e restringir o regex a URLs com esquema, `www.` e encurtadores.
+**Correção:** link e template são analisados só na mensagem nova. As chaves `contextInfo` e `quotedMessage` são ignoradas em qualquer nível, e mensagens temporárias e de visualização única continuam analisadas. Domínio sem esquema continua contando como link, inclusive subdomínio (`promo.golpe.com`), mas não quando faz parte de um e-mail (`joao@empresa.com`, `joao.me@gmail.com`).
+
+**Decisão mantida:** domínio solto como `site.com` conta como link por política do grupo. A detecção de template ainda dispara com qualquer chave que contenha `template` na mensagem nova.
 
 ---
 
@@ -181,4 +183,6 @@ Os logs de diagnóstico gravam telefones e JIDs de participantes, inclusive o cl
 
 Há cobertura de identidade do remetente, spam, trava de expulsão, autenticação do webhook, cache e limite da busca de token, timeout do cliente HTTP, leitura de `fetchInstances` e corpo do `webhook/set`.
 
-Faltam testes de citação com link, domínio casual e e-mail, grupo fechado, job parcial, falha de status, `type` desconhecido e contrato JSON da Rise (`campaign_id`, `guardian_linked`, `send_message`).
+Há cobertura de citação com link e com template, legenda com link em resposta, mensagem temporária, e-mail e domínio solto.
+
+Faltam testes de grupo fechado, job parcial, falha de status, `type` desconhecido e contrato JSON da Rise (`campaign_id`, `guardian_linked`, `send_message`).
