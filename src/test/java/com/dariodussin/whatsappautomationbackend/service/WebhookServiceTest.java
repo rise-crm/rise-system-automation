@@ -7,6 +7,8 @@ import com.dariodussin.whatsappautomationbackend.model.WorkerInstanceByGroup;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -283,6 +285,121 @@ class WebhookServiceTest {
         webhookService.checkMessage(upsert(MEMBER_PN, null));
 
         verify(removalLock).release(GROUP, MEMBER_PN);
+    }
+
+    @Test
+    void replyQuotingALinkIsNotModerated() {
+        memberAndAdminInGroup();
+        Map<String, Object> quote = Map.of("quotedMessage", Map.of("conversation", "promo https://evil.example"));
+
+        webhookService.checkMessage(message(
+                Map.of("extendedTextMessage", Map.of("text", "ok, obrigado", "contextInfo", quote)),
+                "extendedTextMessage", quote));
+
+        verifyNotModerated();
+    }
+
+    @Test
+    void replyQuotingATemplateIsNotModerated() {
+        memberAndAdminInGroup();
+        Map<String, Object> quote = Map.of("quotedMessage",
+                Map.of("templateMessage", Map.of("hydratedTemplate", Map.of("hydratedContentText", "oferta"))));
+
+        webhookService.checkMessage(message(
+                Map.of("extendedTextMessage", Map.of("text", "ok", "contextInfo", quote)),
+                "extendedTextMessage", quote));
+
+        verifyNotModerated();
+    }
+
+    @Test
+    void ownCaptionLinkInAReplyIsModerated() {
+        memberAndAdminInGroup();
+        Map<String, Object> quote = Map.of("quotedMessage", Map.of("conversation", "bom dia"));
+
+        webhookService.checkMessage(message(
+                Map.of("imageMessage", Map.of("caption", "promo golpe.xyz/abc", "contextInfo", quote)),
+                "imageMessage", quote));
+
+        verifyModerated();
+    }
+
+    @Test
+    void linkInsideEphemeralWrapperIsModerated() {
+        memberAndAdminInGroup();
+
+        webhookService.checkMessage(message(
+                Map.of("ephemeralMessage", Map.of("message",
+                        Map.of("extendedTextMessage", Map.of("text", "veja https://evil.example")))),
+                "ephemeralMessage", null));
+
+        verifyModerated();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "mande para joao@empresa.com",
+            "contato: joao.silva@empresa.com.br",
+            "meu email joao.me@gmail.com",
+            "suporte@mail.empresa.io amanhã"
+    })
+    void emailAddressesAreNotLinks(String text) {
+        memberAndAdminInGroup();
+
+        webhookService.checkMessage(message(Map.of("conversation", text), "conversation", null));
+
+        verifyNotModerated();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "acesse golpe.com",
+            "promo.golpe.com.br hoje",
+            "entre em wa.me/5511999999999",
+            "www.evil.example",
+            "veja golpe.xyz/abc e fale com joao@empresa.com"
+    })
+    void bareDomainsAndShortenersAreLinks(String text) {
+        memberAndAdminInGroup();
+
+        webhookService.checkMessage(message(Map.of("conversation", text), "conversation", null));
+
+        verifyModerated();
+    }
+
+    private void memberAndAdminInGroup() {
+        when(evolutionApiService.findGroupParticipants(GUARDIAN, GROUP)).thenReturn(List.of(
+                participant(MEMBER_PN, null),
+                participant(ADMIN_PN, "admin")));
+    }
+
+    private void verifyModerated() {
+        verify(evolutionApiService).deleteMessageForEveryone(eq(ADMIN_INSTANCE), any(), eq(MEMBER_PN));
+        verify(evolutionApiService).removeGroupParticipant(ADMIN_INSTANCE, GROUP, MEMBER_PN);
+    }
+
+    private void verifyNotModerated() {
+        verify(evolutionApiService, never()).deleteMessageForEveryone(anyString(), any(), anyString());
+        verify(evolutionApiService, never()).removeGroupParticipant(anyString(), anyString(), anyString());
+    }
+
+    private EvolutionWebhookPayload message(Map<String, Object> message, String messageType,
+                                            Map<String, Object> contextInfo) {
+        Map<String, Object> key = new HashMap<>();
+        key.put("remoteJid", GROUP);
+        key.put("fromMe", false);
+        key.put("id", "MSG-" + message.hashCode());
+        key.put("participant", MEMBER_PN);
+        Map<String, Object> data = new HashMap<>();
+        data.put("key", key);
+        data.put("message", message);
+        data.put("messageType", messageType);
+        if (contextInfo != null) {
+            data.put("contextInfo", contextInfo);
+        }
+        return new EvolutionWebhookPayload(
+                "messages.upsert", GUARDIAN, jsonMapper.valueToTree(data),
+                null, null, null, null, null);
     }
 
     private static GroupParticipant participant(String id, String admin) {

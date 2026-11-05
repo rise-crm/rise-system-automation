@@ -21,13 +21,19 @@ import java.util.regex.Pattern;
 @Service
 public class WebhookService {
 
+    /** Domínio sem esquema conta como link, exceto quando faz parte de um e-mail. */
     private static final Pattern LINK_PATTERN = Pattern.compile(
-            "(?i)((https?://|www\\.)\\S+|\\b(wa\\.me|t\\.me|bit\\.ly)/\\S+|\\b[a-z0-9][a-z0-9-]*\\.(com|com\\.br|net|org|io|app|me|co|xyz|link)(/\\S*)?)"
+            "(?i)((https?://|www\\.)\\S+"
+                    + "|\\b(wa\\.me|t\\.me|bit\\.ly)/\\S+"
+                    + "|(?<![@\\w.-])(?:[a-z0-9][a-z0-9-]*\\.)+(com\\.br|com|net|org|io|app|me|co|xyz|link)\\b(?![\\w.-]*@)(/\\S*)?)"
     );
 
     private static final Set<String> TEXT_KEYS = Set.of(
             "conversation", "text", "caption", "matchedText", "canonicalUrl", "description"
     );
+
+    /** Mensagem citada e metadados de resposta ficam nessas chaves; só a mensagem nova é moderada. */
+    private static final Set<String> QUOTED_CONTENT_KEYS = Set.of("contextInfo", "quotedMessage");
 
     private final JsonMapper jsonMapper;
     private final EvolutionApiService evolutionApiService;
@@ -64,7 +70,7 @@ public class WebhookService {
         MessageUpsertData data = jsonMapper.convertValue(payload.data(), MessageUpsertData.class);
         MessageKey key = data != null ? data.key() : null;
         String messageText = data != null
-                ? extractVisibleText(data.message(), data.contextInfo())
+                ? extractOwnText(data.message())
                 : "";
 
         String ctx = String.format("instance=%s | group=%s | msgId=%s",
@@ -504,10 +510,9 @@ public class WebhookService {
         return colon >= 0 ? user.substring(0, colon) : user;
     }
 
-    private static String extractVisibleText(Map<String, Object> message, Map<String, Object> contextInfo) {
+    private static String extractOwnText(Map<String, Object> message) {
         StringBuilder text = new StringBuilder();
         collectText(message, text);
-        collectText(contextInfo, text);
         return text.toString();
     }
 
@@ -516,6 +521,9 @@ public class WebhookService {
             for (Map.Entry<?, ?> entry : map.entrySet()) {
                 String field = String.valueOf(entry.getKey());
                 Object value = entry.getValue();
+                if (QUOTED_CONTENT_KEYS.contains(field)) {
+                    continue;
+                }
                 if (TEXT_KEYS.contains(field) && value instanceof String string && !string.isBlank()) {
                     if (out.length() > 0) {
                         out.append('\n');
@@ -555,32 +563,13 @@ public class WebhookService {
         return containsTemplatePayload(data.message());
     }
 
-    private static boolean containsTemplatePayload(Map<String, Object> message) {
-        if (message == null || message.isEmpty()) {
-            return false;
-        }
-
-        for (String key : message.keySet()) {
-            if (TEMPLATE_MESSAGE_KEYS.contains(key)) {
-                return true;
-            }
-            if (key.toLowerCase().contains("template")) {
-                return true;
-            }
-        }
-
-        for (Object value : message.values()) {
-            if (containsTemplatePayload(value)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     private static boolean containsTemplatePayload(Object node) {
         if (node instanceof Map<?, ?> map) {
             for (Map.Entry<?, ?> entry : map.entrySet()) {
                 String key = String.valueOf(entry.getKey());
+                if (QUOTED_CONTENT_KEYS.contains(key)) {
+                    continue;
+                }
                 if (TEMPLATE_MESSAGE_KEYS.contains(key) || key.toLowerCase().contains("template")) {
                     return true;
                 }
