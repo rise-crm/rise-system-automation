@@ -13,10 +13,17 @@ public class EvolutionClientConfig {
     @Value("${evolution.key}")
     private String evolutionKey;
 
+    @Value("${http.connect-timeout-ms}")
+    private int connectTimeoutMs;
+
+    @Value("${evolution.response-timeout-ms}")
+    private long responseTimeoutMs;
+
     @Bean
     public WebClient evolutionClient() {
         return WebClient.builder()
                 .baseUrl(evolutionUrl)
+                .clientConnector(HttpConnectors.withTimeouts(connectTimeoutMs, responseTimeoutMs))
                 .defaultHeader("Content-Type", "application/json")
                 .defaultHeader("apikey", evolutionKey)
                 .build();

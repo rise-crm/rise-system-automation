@@ -41,7 +41,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @TestPropertySource(properties = {
         "admin.token=admin-secret",
         "evolution.key=evolution-key",
-        "webhook.token-ttl=0"
+        "webhook.token-ttl=0",
+        "webhook.token-lookup.permits-per-second=1000",
+        "webhook.token-lookup.burst=1000"
 })
 class SecurityConfigTest {
 

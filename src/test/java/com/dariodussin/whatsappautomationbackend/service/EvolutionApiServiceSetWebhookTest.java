@@ -28,8 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class EvolutionApiServiceSetWebhookTest {
 
-    private static final List<String> EVENTS = List.of(
-            "SEND_MESSAGE", "MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE");
+    private static final List<String> EVENTS = List.of("MESSAGES_UPSERT");
 
     @Test
     void sendsSettingsWrappedInWebhookObject() {
@@ -42,11 +41,11 @@ class EvolutionApiServiceSetWebhookTest {
         JsonNode webhook = bodyOf(sent.get()).get("webhook");
         assertTrue(webhook.get("enabled").asBoolean());
         assertEquals("https://api.example.com/webhook/message-check", webhook.get("url").asString());
-        assertEquals(4, webhook.get("events").size());
-        assertEquals("SEND_MESSAGE", webhook.get("events").get(0).asString());
+        assertEquals(1, webhook.get("events").size());
+        assertEquals("MESSAGES_UPSERT", webhook.get("events").get(0).asString());
         assertTrue(webhook.get("headers").isObject());
         assertFalse(webhook.get("byEvents").asBoolean());
-        assertTrue(webhook.get("base64").asBoolean());
+        assertFalse(webhook.get("base64").asBoolean());
     }
 
     @Test

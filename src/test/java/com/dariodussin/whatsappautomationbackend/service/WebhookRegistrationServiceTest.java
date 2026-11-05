@@ -17,8 +17,7 @@ import static org.mockito.Mockito.when;
 
 class WebhookRegistrationServiceTest {
 
-    private static final List<String> EVENTS = List.of(
-            "SEND_MESSAGE", "MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE");
+    private static final List<String> EVENTS = List.of("MESSAGES_UPSERT");
 
     @Test
     void registersMessageCheckCallbackAndReturnsInstanceToken() {
