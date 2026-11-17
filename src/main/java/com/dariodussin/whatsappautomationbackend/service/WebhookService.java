@@ -21,18 +21,20 @@ import java.util.regex.Pattern;
 @Service
 public class WebhookService {
 
-    /** Only scheme URLs, www., and known shorteners — not bare domains or emails. */
+    /** Domínio sem esquema conta como link, exceto quando faz parte de um e-mail. */
     private static final Pattern LINK_PATTERN = Pattern.compile(
-            "(?i)(https?://\\S+|www\\.\\S+|\\b(?:wa\\.me|t\\.me|bit\\.ly)/\\S+)"
+            "(?i)((https?://|www\\.)\\S+"
+                    + "|\\b(wa\\.me|t\\.me|bit\\.ly)/\\S+"
+                    + "|(?<![@\\w.-])(?:[a-z0-9][a-z0-9-]*\\.)+(com\\.br|com|net|org|io|app|me|co|xyz|link)\\b(?![\\w.-]*@)(/\\S*)?)"
     );
 
     private static final Set<String> TEXT_KEYS = Set.of(
             "conversation", "text", "caption"
     );
 
-    /** Nested keys that belong to quoted/context content and must not trigger moderation. */
-    private static final Set<String> SKIP_NESTED_KEYS = Set.of(
-            "quotedMessage", "contextInfo", "quotedAd", "externalAdReply"
+    /** Mensagem citada e metadados de resposta; só a mensagem nova é moderada. */
+    private static final Set<String> QUOTED_CONTENT_KEYS = Set.of(
+            "contextInfo", "quotedMessage", "quotedAd", "externalAdReply"
     );
 
     private final JsonMapper jsonMapper;
@@ -69,7 +71,9 @@ public class WebhookService {
     private void handleUpsert(EvolutionWebhookPayload payload) {
         MessageUpsertData data = jsonMapper.convertValue(payload.data(), MessageUpsertData.class);
         MessageKey key = data != null ? data.key() : null;
-        String messageText = data != null ? extractVisibleText(data.message()) : "";
+        String messageText = data != null
+                ? extractOwnText(data.message())
+                : "";
 
         String ctx = String.format("instance=%s | group=%s | msgId=%s",
                 payload.instance(),
@@ -508,8 +512,7 @@ public class WebhookService {
         return colon >= 0 ? user.substring(0, colon) : user;
     }
 
-    /** Text/caption of the new message only — ignores quotedMessage and contextInfo. */
-    private static String extractVisibleText(Map<String, Object> message) {
+    private static String extractOwnText(Map<String, Object> message) {
         StringBuilder text = new StringBuilder();
         collectText(message, text);
         return text.toString();
@@ -519,7 +522,7 @@ public class WebhookService {
         if (node instanceof Map<?, ?> map) {
             for (Map.Entry<?, ?> entry : map.entrySet()) {
                 String field = String.valueOf(entry.getKey());
-                if (SKIP_NESTED_KEYS.contains(field)) {
+                if (QUOTED_CONTENT_KEYS.contains(field)) {
                     continue;
                 }
                 Object value = entry.getValue();
@@ -571,11 +574,11 @@ public class WebhookService {
         if (node instanceof Map<?, ?> map) {
             for (Map.Entry<?, ?> entry : map.entrySet()) {
                 String key = String.valueOf(entry.getKey());
+                if (QUOTED_CONTENT_KEYS.contains(key)) {
+                    continue;
+                }
                 if (TEMPLATE_MESSAGE_KEYS.contains(key)) {
                     return true;
-                }
-                if (SKIP_NESTED_KEYS.contains(key)) {
-                    continue;
                 }
                 if (containsKnownTemplatePayload(entry.getValue())) {
                     return true;
