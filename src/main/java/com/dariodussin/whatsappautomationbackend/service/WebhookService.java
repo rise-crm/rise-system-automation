@@ -21,12 +21,18 @@ import java.util.regex.Pattern;
 @Service
 public class WebhookService {
 
+    /** Only scheme URLs, www., and known shorteners — not bare domains or emails. */
     private static final Pattern LINK_PATTERN = Pattern.compile(
-            "(?i)((https?://|www\\.)\\S+|\\b(wa\\.me|t\\.me|bit\\.ly)/\\S+|\\b[a-z0-9][a-z0-9-]*\\.(com|com\\.br|net|org|io|app|me|co|xyz|link)(/\\S*)?)"
+            "(?i)(https?://\\S+|www\\.\\S+|\\b(?:wa\\.me|t\\.me|bit\\.ly)/\\S+)"
     );
 
     private static final Set<String> TEXT_KEYS = Set.of(
-            "conversation", "text", "caption", "matchedText", "canonicalUrl", "description"
+            "conversation", "text", "caption"
+    );
+
+    /** Nested keys that belong to quoted/context content and must not trigger moderation. */
+    private static final Set<String> SKIP_NESTED_KEYS = Set.of(
+            "quotedMessage", "contextInfo", "quotedAd", "externalAdReply"
     );
 
     private final JsonMapper jsonMapper;
@@ -63,9 +69,7 @@ public class WebhookService {
     private void handleUpsert(EvolutionWebhookPayload payload) {
         MessageUpsertData data = jsonMapper.convertValue(payload.data(), MessageUpsertData.class);
         MessageKey key = data != null ? data.key() : null;
-        String messageText = data != null
-                ? extractVisibleText(data.message(), data.contextInfo())
-                : "";
+        String messageText = data != null ? extractVisibleText(data.message()) : "";
 
         String ctx = String.format("instance=%s | group=%s | msgId=%s",
                 payload.instance(),
@@ -504,10 +508,10 @@ public class WebhookService {
         return colon >= 0 ? user.substring(0, colon) : user;
     }
 
-    private static String extractVisibleText(Map<String, Object> message, Map<String, Object> contextInfo) {
+    /** Text/caption of the new message only — ignores quotedMessage and contextInfo. */
+    private static String extractVisibleText(Map<String, Object> message) {
         StringBuilder text = new StringBuilder();
         collectText(message, text);
-        collectText(contextInfo, text);
         return text.toString();
     }
 
@@ -515,6 +519,9 @@ public class WebhookService {
         if (node instanceof Map<?, ?> map) {
             for (Map.Entry<?, ?> entry : map.entrySet()) {
                 String field = String.valueOf(entry.getKey());
+                if (SKIP_NESTED_KEYS.contains(field)) {
+                    continue;
+                }
                 Object value = entry.getValue();
                 if (TEXT_KEYS.contains(field) && value instanceof String string && !string.isBlank()) {
                     if (out.length() > 0) {
@@ -548,43 +555,29 @@ public class WebhookService {
         }
 
         String messageType = data.messageType();
-        if (messageType != null && messageType.toLowerCase().contains("template")) {
-            return true;
+        if (messageType != null) {
+            String normalized = messageType.toLowerCase();
+            if (normalized.equals("templatemessage")
+                    || normalized.equals("templatebuttonreplymessage")
+                    || normalized.equals("highlystructuredmessage")) {
+                return true;
+            }
         }
 
-        return containsTemplatePayload(data.message());
+        return containsKnownTemplatePayload(data.message());
     }
 
-    private static boolean containsTemplatePayload(Map<String, Object> message) {
-        if (message == null || message.isEmpty()) {
-            return false;
-        }
-
-        for (String key : message.keySet()) {
-            if (TEMPLATE_MESSAGE_KEYS.contains(key)) {
-                return true;
-            }
-            if (key.toLowerCase().contains("template")) {
-                return true;
-            }
-        }
-
-        for (Object value : message.values()) {
-            if (containsTemplatePayload(value)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean containsTemplatePayload(Object node) {
+    private static boolean containsKnownTemplatePayload(Object node) {
         if (node instanceof Map<?, ?> map) {
             for (Map.Entry<?, ?> entry : map.entrySet()) {
                 String key = String.valueOf(entry.getKey());
-                if (TEMPLATE_MESSAGE_KEYS.contains(key) || key.toLowerCase().contains("template")) {
+                if (TEMPLATE_MESSAGE_KEYS.contains(key)) {
                     return true;
                 }
-                if (containsTemplatePayload(entry.getValue())) {
+                if (SKIP_NESTED_KEYS.contains(key)) {
+                    continue;
+                }
+                if (containsKnownTemplatePayload(entry.getValue())) {
                     return true;
                 }
             }
@@ -592,7 +585,7 @@ public class WebhookService {
         }
         if (node instanceof List<?> list) {
             for (Object item : list) {
-                if (containsTemplatePayload(item)) {
+                if (containsKnownTemplatePayload(item)) {
                     return true;
                 }
             }

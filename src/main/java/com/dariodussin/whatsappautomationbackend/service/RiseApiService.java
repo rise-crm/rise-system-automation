@@ -88,11 +88,13 @@ public class RiseApiService {
         }
     }
 
-    public void updateJobStatus(String jobId, JobStatus status, String errorMessage) {
-        updateJobStatus(jobId, status, errorMessage, false);
+    /** @return true when Rise accepted the status change */
+    public boolean updateJobStatus(String jobId, JobStatus status, String errorMessage) {
+        return updateJobStatus(jobId, status, errorMessage, false);
     }
 
-    public void updateJobStatus(String jobId, JobStatus status, String errorMessage, boolean incrementRetry) {
+    /** @return true when Rise accepted the status change */
+    public boolean updateJobStatus(String jobId, JobStatus status, String errorMessage, boolean incrementRetry) {
         try {
             System.out.printf("[DB-UPDATE] Job: %s | New Status: %s | increment_retry=%s%n",
                     jobId, status, incrementRetry);
@@ -119,9 +121,55 @@ public class RiseApiService {
                             }))
                     .bodyToMono(Void.class)
                     .block();
+            return true;
         } catch (Exception e) {
             System.err.println("[CRITICAL] Failed to update job status: " + e.getMessage());
+            return false;
         }
+    }
+
+    /**
+     * Jobs stuck in {@code executing} (e.g. pod died mid-run). Filtered by {@code updated_at}
+     * older than {@code olderThanMinutes}.
+     */
+    public List<ScheduleJob> fetchAbandonedExecutingTasks(int olderThanMinutes) {
+        long started = System.currentTimeMillis();
+        try {
+            List<ScheduleJob> jobs = edgeFunctionsClient.get()
+                    .uri(uri -> uri.pathSegment("worker-jobs")
+                            .queryParam("status", "executing")
+                            .queryParam("limit", PENDING_JOBS_LIMIT)
+                            .build())
+                    .retrieve()
+                    .onStatus(status -> status.isError(), response ->
+                            response.bodyToMono(String.class).flatMap(body ->
+                                    Mono.error(new RuntimeException(
+                                            "Rise API GET /worker-jobs (executing) failed: " + body))))
+                    .bodyToMono(new ParameterizedTypeReference<List<ScheduleJob>>() {})
+                    .block();
+            if (jobs == null || jobs.isEmpty()) {
+                return List.of();
+            }
+            OffsetDateTime cutoff = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(olderThanMinutes);
+            List<ScheduleJob> abandoned = jobs.stream()
+                    .filter(job -> isUpdatedBefore(job, cutoff))
+                    .toList();
+            System.out.printf("[RISE] GET /worker-jobs | status=executing | total=%d | abandoned=%d | duration=%dms%n",
+                    jobs.size(), abandoned.size(), System.currentTimeMillis() - started);
+            return abandoned;
+        } catch (Exception e) {
+            System.err.printf("[RISE] GET /worker-jobs failed | status=executing | error=%s | duration=%dms%n",
+                    e.getClass().getSimpleName(), System.currentTimeMillis() - started);
+            throw e;
+        }
+    }
+
+    private static boolean isUpdatedBefore(ScheduleJob job, OffsetDateTime cutoff) {
+        OffsetDateTime updated = job.updatedAt() != null ? job.updatedAt() : job.processedAt();
+        if (updated == null) {
+            updated = job.scheduledAt();
+        }
+        return updated != null && updated.isBefore(cutoff);
     }
 
     public String getInstanceNameByCampaignId(String campaignId) {

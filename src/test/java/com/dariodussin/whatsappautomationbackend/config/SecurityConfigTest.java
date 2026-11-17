@@ -19,6 +19,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -326,7 +327,15 @@ class SecurityConfigTest {
 
     @Test
     void unknownRouteIsUnauthorized() throws Exception {
-        mvc.perform(get("/actuator/health"))
+        mvc.perform(get("/internal/secret"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void actuatorHealthIsPermittedForProbes() throws Exception {
+        // Slice test does not load Actuator endpoints; auth must still allow the path (not 401).
+        mvc.perform(get("/actuator/health"))
+                .andExpect(result -> assertEquals(false,
+                        result.getResponse().getStatus() == HttpStatus.UNAUTHORIZED.value()));
     }
 }

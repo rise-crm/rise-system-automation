@@ -46,16 +46,24 @@ public class JobRunner {
             String jobId = task.id();
             try {
                 System.out.printf("[JOBS] Start | id=%s | type=%s%n", jobId, task.type());
-                riseApiService.updateJobStatus(jobId, JobStatus.EXECUTING, null);
+                if (!riseApiService.updateJobStatus(jobId, JobStatus.EXECUTING, null)) {
+                    System.err.printf("[JOBS] Claim failed | id=%s | skipping to avoid duplicate send%n", jobId);
+                    continue;
+                }
 
                 jobExecutionService.execute(task);
 
-                riseApiService.updateJobStatus(jobId, JobStatus.COMPLETED, null);
-                System.out.printf("[JOBS] Completed | id=%s%n", jobId);
+                if (!riseApiService.updateJobStatus(jobId, JobStatus.COMPLETED, null)) {
+                    System.err.printf("[JOBS] Completed locally but status PATCH failed | id=%s%n", jobId);
+                } else {
+                    System.out.printf("[JOBS] Completed | id=%s%n", jobId);
+                }
 
             } catch (Exception e) {
                 System.err.println("[CRITICAL] Catching failure for Job " + jobId + ": " + e.getMessage());
-                riseApiService.updateJobStatus(jobId, JobStatus.ERROR, e.getMessage(), true);
+                if (!riseApiService.updateJobStatus(jobId, JobStatus.ERROR, e.getMessage(), true)) {
+                    System.err.printf("[JOBS] Failed to mark error status | id=%s%n", jobId);
+                }
             }
         }
     }

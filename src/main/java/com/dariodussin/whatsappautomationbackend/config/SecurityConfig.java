@@ -37,6 +37,7 @@ public class SecurityConfig {
                 .addFilterBefore(apiKeyFilter, UsernamePasswordAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers("/webhook/**").hasRole(ApiKeyAuthenticationFilter.ROLE_WEBHOOK)
                         .requestMatchers("/admin/**").hasRole(ApiKeyAuthenticationFilter.ROLE_ADMIN)
                         .anyRequest().denyAll())

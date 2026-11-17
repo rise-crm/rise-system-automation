@@ -21,7 +21,7 @@ spec:
       containers:
         - name: backend
           image: ezdussin/whatsapp-automation-backend:latest
-          # Always check for a newer version of 'latest' on every restart
+          # CI overwrites the tag with the git SHA before apply
           imagePullPolicy: Always
           ports:
             - containerPort: 8081
@@ -67,6 +67,19 @@ spec:
                 secretKeyRef:
                   name: backend-secrets
                   key: REDIS_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8081
+            initialDelaySeconds: 40
+            periodSeconds: 15
           resources:
             requests:
               memory: "512Mi"
